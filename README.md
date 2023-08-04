@@ -15,9 +15,20 @@ To provision:
 
 ## 1. Terraform
 
-The Terraform declaration must specify all the aforementioned infrastructure required. Code will be set for the two node types (Master and Worker).
+In a nutshell, this code declaration will create many EC2 instances based on information obtained from the environment variable `vm_config`:
 
-Different from other Terraform projects I worked on, this one "stores" arrays with instance specs on an environment variable (`vm_config`), contained on the `.tfvars` file. Such information is disclosed here for learning, but remember: not a safe practice.
+```
+#variables.tf
+variable "vm_config" {
+      description = "List instance objects"
+      default = [{}]
+    }
+```
+
+This information is represented as an array with two objects (one for each node type), each containing all of its instance specs. 
+
+> [!WARNING]
+> Such information is disclosed here for learning, but remember: not a safe practice.
 
 ```
 #terraform.tfvars
@@ -41,5 +52,11 @@ vm_config = [
  ]
 
 ```
-### Worth noting:
-`node_name` must define the node types. `Master` has 1 `no_of_instances`, while `Worker` has 2.
+
+> [!NOTE]
+> `node_name` must define the node types. `Master` has 1 `no_of_instances`, while `Worker` has 2. The rest is a bit obvious.
+
+### main.tf
+
+The code structure is under `main.tf`. The whole iteration logic demands some explanation:
+
