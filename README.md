@@ -63,6 +63,49 @@ The code structure is under `main.tf`. Some explanation on the blocks declared:
 - `locals`: as the name says, this block [defines local variables to make coding simpler](https://developer.hashicorp.com/terraform/language/values/locals). Two `locals` blocks are declared:
   1. `serverconfig` iterates over `vm_config` and, for each item (`srv`) on the array, it creates a new object (that is, an EC2 instance) based on properties therein defined;
   2. `instances` uses [flatten](https://developer.hashicorp.com/terraform/language/functions/flatten) to convert the elements of `serverconfig` to a flattened list.
+```
+#main.tf
+locals {
+  serverconfig = [
+    for srv in var.vm_config : [
+      for i in range(1, srv.no_of_instances+1) : {
+        instance_name   = "${srv.node_name}-${i}"
+        instance_type   = srv.instance_type
+        subnet_id       = srv.subnet_id
+        ami             = srv.ami
+        security_groups = srv.vpc_security_group_ids
+      }
+    ]
+  ]
+}
+
+locals {
+  instances = flatten(local.serverconfig)
+}
+```
+
 - `resource`: basic Terraform block to provision a [resource](https://developer.hashicorp.com/terraform/language/resources/syntax) (in this case, an `aws_instance` named `kubeadm`).
   - `for_each` has the iteration declaration to provision an instance for each item declared on `instances`;
+```
+#main.tf
+resource "aws_instance" "kubeadm" {
+  for_each               = {for server in local.instances: server.instance_name => server}
+  ami                    = each.value.ami
+  instance_type          = each.value.instance_type
+  vpc_security_group_ids = each.value.security_groups
+  key_name               = "<name-of-your-secret-key>"
+  subnet_id              = each.value.subnet_id
+  tags = {
+    Name = "${each.value.instance_name}"
+  }
+}
+```
+
 - `output`: declaration to [return provisioning information on the output line](https://developer.hashicorp.com/terraform/language/values/outputs).
+```
+#main.tf
+output "instances" {
+  value       = aws_instance.kubeadm
+  description = "All Machine details"
+}
+```
