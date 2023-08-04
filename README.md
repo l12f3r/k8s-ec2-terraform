@@ -25,7 +25,7 @@ variable "vm_config" {
     }
 ```
 
-This information is represented as an array with two objects (one for each node type), each containing all of its instance specs. 
+This information is represented as an array with two items (one for each node type), each containing all of its instance specs. 
 
 > [!WARNING]
 > Such information is disclosed here for learning, but remember: not a safe practice.
@@ -58,5 +58,11 @@ vm_config = [
 
 ### main.tf
 
-The code structure is under `main.tf`. The whole iteration logic demands some explanation:
+The code structure is under `main.tf`. Some explanation on the blocks declared:
 
+- `locals`: as the name says, this block [defines local variables to make coding simpler](https://developer.hashicorp.com/terraform/language/values/locals). Two `locals` blocks are declared:
+  1. `serverconfig` iterates over `vm_config` and, for each item (`srv`) on the array, it creates a new object (that is, an EC2 instance) based on properties therein defined;
+  2. `instances` uses [flatten](https://developer.hashicorp.com/terraform/language/functions/flatten) to convert the elements of `serverconfig` to a flattened list.
+- `resource`: basic Terraform block to provision a [resource](https://developer.hashicorp.com/terraform/language/resources/syntax) (in this case, an `aws_instance` named `kubeadm`).
+  - `for_each` has the iteration declaration to provision an instance for each item declared on `instances`;
+- `output`: declaration to [return provisioning information on the output line](https://developer.hashicorp.com/terraform/language/values/outputs).
