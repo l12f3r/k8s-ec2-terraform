@@ -12,6 +12,8 @@ To provision:
   - one as master node (with 4GB of memory and 2 CPUs); and 
   - two others as workers (with 1GB of memory and 1 CPU each).
 - Two security groups, to work as firewalls for inbound traffic on both node types (that is, one SG for master and another for all worker nodes)
+- Two subnets, in different availability zones, for each node type to be properly housed;
+
 
 ## 1. Terraform
 
@@ -38,19 +40,18 @@ vm_config = [
     "ami" : "ami-0aa2b7722dc1b5612",
     "no_of_instances" : "1",
     "instance_type" : "t2.medium",
-    "subnet_id" : "subnet-780bde35",
-    "vpc_security_group_ids" : ["sg-053564b3ef25f1f05"]
+    "subnet_id" : aws_subnet.master_subnet.id,
+    "vpc_security_group_ids" : [aws_security_group.master_security_group.id]
   },
   {
     "node_name" : "Worker",
     "ami" : "ami-0aa2b7722dc1b5612",
     "instance_type" : "t2.micro",
     "no_of_instances" : "2"
-    "subnet_id" : "subnet-780bde35"
-    "vpc_security_group_ids" : ["sg-0e037e6dd7973a887"]
+    "subnet_id" : aws_subnet.worker_subnet.id
+    "vpc_security_group_ids" : [aws_security_group.worker_security_group.id]
   }
  ]
-
 ```
 
 > [!NOTE]
@@ -84,7 +85,7 @@ locals {
 }
 ```
 
-- `resource`: basic Terraform block to provision a [resource](https://developer.hashicorp.com/terraform/language/resources/syntax) (in this case, an `aws_instance` named `kubeadm`).
+- `resource`: basic Terraform block to provision a [resource](https://developer.hashicorp.com/terraform/language/resources/syntax) (in this case, an `aws_instance` named `kubeadm`). There are specific `resource` blocks for instances, VPCs, subnets and security groups.
   - `for_each` has the iteration declaration to provision an instance for each item declared on `instances`;
 ```
 #main.tf
