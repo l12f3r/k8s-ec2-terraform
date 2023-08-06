@@ -229,3 +229,17 @@ aws ec2 describe-instances \
     --query 'Reservations[*].Instances[*].{Subnet:SubnetID,VPC:VpcId,Instance:InstanceId,AZ:Placement.AvailabilityZone,Name:Tags[?Key==`Name`]|[0].Value}' \
     --output table
 ```
+
+Those were mine results:
+
+```
+--------------------------------------------------------------------------------------------------------
+|                                           DescribeInstances                                          |
++------------+----------------------+-----------+----------------------------+-------------------------+
+|     AZ     |      Instance        |   Name    |         SubnetID           |           VPC           |
++------------+----------------------+-----------+----------------------------+-------------------------+
+|  eu-west-1b|  i-030bbae7f7dcf8d81 |  Worker-1 |  subnet-0f67606f309a28c24  |  vpc-044fc25ec58e6af60  |
+|  eu-west-1b|  i-015a6419622ba9b81 |  Worker-2 |  subnet-0f67606f309a28c24  |  vpc-044fc25ec58e6af60  |
+|  eu-west-1a|  i-024a31eeeb7f6a9d3 |  Master-1 |  subnet-0531d901e310d6336  |  vpc-044fc25ec58e6af60  |
++------------+----------------------+-----------+----------------------------+-------------------------+
+```
