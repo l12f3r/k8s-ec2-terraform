@@ -1,7 +1,12 @@
 variable "vm_config" {
-      description = "List instance objects"
-      default = [{}]
-    }
+  description = "List instance objects"
+  default = [{}]
+}
+
+variable "sg_config" {
+  description = "List security groups"
+  default = [{}]
+}
 
 variable "vpc_cidr_block" {
   description = "CIDR block for VPC"
