@@ -31,6 +31,7 @@ In a nutshell, this code declaration will create many EC2 instances based on inf
 
 ```
 #variables.tf
+
 variable "vm_config" {
       description = "List instance objects"
       default = [{}]
@@ -44,16 +45,17 @@ This information is represented as an array with two items (one for each node ty
 
 ```
 #terraform.tfvars
+
 vm_config = [
   {
     "node_name" : "Master",
-    "ami" : "ami-0aa2b7722dc1b5612",
+    "ami" : "ami-061da7f56569c2493",
     "instance_type" : "t2.medium",
     "no_of_instances" : "1",
   },
   {
     "node_name" : "Worker",
-    "ami" : "ami-0aa2b7722dc1b5612",
+    "ami" : "ami-061da7f56569c2493",
     "instance_type" : "t2.micro",
     "no_of_instances" : "2", 
   }
@@ -67,32 +69,39 @@ vm_config = [
 
 The code structure is under `main.tf`. Some explanation on the blocks declared:
 
-- `locals`: as the name says, this block [defines local variables to make coding simpler](https://developer.hashicorp.com/terraform/language/values/locals). Two `locals` blocks are declared:
-  1. `serverconfig` iterates over `vm_config` and, for each item (`srv`) on the array, it creates a new object (that is, an EC2 instance) based on properties therein defined;
-  2. `instances` uses [flatten](https://developer.hashicorp.com/terraform/language/functions/flatten) to convert the elements of `serverconfig` to a flattened list.
+- `resource`: basic Terraform block to provision [resources](https://developer.hashicorp.com/terraform/language/resources/syntax). There are specific `resource` blocks for instances, VPCs, subnets and security groups. A few notes:
+  - `aws_instance.kubeadm` is the declaration that provisions our three instances. It `depends_on` all other resources to be provisioned.
+    - `for_each` iterates over the flattened `locals.instances` list and provisions an amount of instances for each item therein included;
+    - `subnet_id` is a conditional: if the instance type is `t2.medium` (which occurs to all `Master` nodes, as per `vm_config`), it should be associated to `aws_subnet.master_subnet` by its ID. Otherwise, it associates to `aws_subnet.worker_subnet`;
+    - The same conditional is applied to `vpc_security_group_ids`, for associating the right instance to its respective security group, but the `toset()` function was applied to convert values to list, as expected by this property.
+
 ```
 #main.tf
-locals {
-  serverconfig = [
-    for srv in var.vm_config : [
-      for i in range(1, srv.no_of_instances+1) : {
-        instance_name   = "${srv.node_name}-${i}"
-        instance_type   = srv.instance_type
-        ami             = srv.ami
-      }
-    ]
-  ]
-}
 
-locals {
-  instances = flatten(local.serverconfig)
+resource "aws_instance" "kubeadm" {
+  for_each               = {for server in local.instances: server.instance_name => server}
+  ami                    = each.value.ami
+  instance_type          = each.value.instance_type
+  key_name               = var.key_name
+  subnet_id              = each.value.instance_type == "t2.medium" ? aws_subnet.master_subnet.id : aws_subnet.worker_subnet.id
+  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master_security_group.id : aws_security_group.worker_security_group.id])
+  depends_on = [ 
+    aws_security_group.master_security_group,
+    aws_security_group.worker_security_group,
+    aws_subnet.master_subnet,
+    aws_subnet.worker_subnet,
+  ]
+  tags = {
+    Name = "${each.value.instance_name}"
+  }
 }
 ```
+  
+  - Security group rules are declared as array on the `.tfvars` file as well, under the `sg_config` environment variable:
 
-- `resource`: basic Terraform block to provision a [resource](https://developer.hashicorp.com/terraform/language/resources/syntax) (in this case, an `aws_instance` named `kubeadm`). There are specific `resource` blocks for instances, VPCs, subnets and security groups.
-  - security group rules are declared as array on the `.tfvars` file as well, under the `sg_config` environment variable:
 ```
 #terraform.tfvars
+
 sg_config = [
   {
     master = {
@@ -187,19 +196,36 @@ sg_config = [
   }  
 ]
 ```
-  - `for_each` has the iteration declaration to provision an instance for each item declared on `instances`;
+
+- `locals`: as the name says, this block [defines local variables to make coding simpler](https://developer.hashicorp.com/terraform/language/values/locals). This is actually the logic that fetches information and prepares it for `aws_instance.kubeadm`. Two `locals` blocks are declared:
+  1. `serverconfig` iterates over `vm_config` and, for each item (`srv`) on the array, it creates a new object (that is, an EC2 instance) based on properties therein defined;
+  2. `instances` uses [flatten](https://developer.hashicorp.com/terraform/language/functions/flatten) to convert the elements of `serverconfig` to a flattened list.
+
 ```
 #main.tf
-resource "aws_instance" "kubeadm" {
-  for_each               = {for server in local.instances: server.instance_name => server}
-  ami                    = each.value.ami
-  instance_type          = each.value.instance_type
-  key_name               = var.key_name
-  tags = {
-    Name = "${each.value.instance_name}"
-  }
+
+locals {
+  serverconfig = [
+    for srv in var.vm_config : [
+      for i in range(1, srv.no_of_instances+1) : {
+        instance_name   = "${srv.node_name}-${i}"
+        instance_type   = srv.instance_type
+        ami             = srv.ami
+      }
+    ]
+  ]
+}
+
+locals {
+  instances = flatten(local.serverconfig)
 }
 ```
 
-> [!NOTE]
-> As one may notice, those instances to be provisioned are not attached to the VPC, subnets and security groups declared on code. This occurs due to `.tfvars` files not accepting environment variables - the instance would need to be attached to objects declared on `vm_config`, and those would be provided after apply only.
+After setting everything up to this point, just run `terraform apply` to see the magic happening. Once completed, run the following code to check the results on the output:
+
+```
+aws ec2 describe-instances \
+    --filters Name=tag-key,Values=Name \
+    --query 'Reservations[*].Instances[*].{Subnet:SubnetID,VPC:VpcId,Instance:InstanceId,AZ:Placement.AvailabilityZone,Name:Tags[?Key==`Name`]|[0].Value}' \
+    --output table
+```

@@ -10,12 +10,18 @@ resource "aws_subnet" "master_subnet" {
   vpc_id                  = aws_vpc.cluster_vpc.id
   cidr_block              = var.master_subnet_cidr
   availability_zone       = var.master_subnet_az
+  tags = {
+    Name = "Master"
+  }
 }
 
 resource "aws_subnet" "worker_subnet" {
   vpc_id                  = aws_vpc.cluster_vpc.id
   cidr_block              = var.worker_subnet_cidr
   availability_zone       = var.worker_subnet_az
+  tags = {
+    Name = "Worker"
+  }
 }
 
 resource "aws_security_group" "master_security_group" {
@@ -65,6 +71,24 @@ resource "aws_security_group" "worker_security_group" {
   }
 }
 
+resource "aws_instance" "kubeadm" {
+  for_each               = {for server in local.instances: server.instance_name => server}
+  ami                    = each.value.ami
+  instance_type          = each.value.instance_type
+  key_name               = var.key_name
+  subnet_id              = each.value.instance_type == "t2.medium" ? aws_subnet.master_subnet.id : aws_subnet.worker_subnet.id
+  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master_security_group.id : aws_security_group.worker_security_group.id])
+  depends_on = [ 
+    aws_security_group.master_security_group,
+    aws_security_group.worker_security_group,
+    aws_subnet.master_subnet,
+    aws_subnet.worker_subnet,
+  ]
+  tags = {
+    Name = "${each.value.instance_name}"
+  }
+}
+
 locals {
   serverconfig = [
     for srv in var.vm_config : [
@@ -79,14 +103,4 @@ locals {
 
 locals {
   instances = flatten(local.serverconfig)
-}
-
-resource "aws_instance" "kubeadm" {
-  for_each               = {for server in local.instances: server.instance_name => server}
-  ami                    = each.value.ami
-  instance_type          = each.value.instance_type
-  key_name               = var.key_name
-  tags = {
-    Name = "${each.value.instance_name}"
-  }
 }

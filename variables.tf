@@ -5,7 +5,7 @@ variable "vm_config" {
 
 variable "sg_config" {
   description = "List security groups"
-  default = [{}]
+    default = [{}]
 }
 
 variable "vpc_cidr_block" {
