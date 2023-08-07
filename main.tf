@@ -125,7 +125,7 @@ resource "aws_instance" "kubeadm" {
 }
 
 locals {
-  serverconfig = [ # Fetches instances from .tfvars file
+  serverconfig = [
     for srv in var.vm_config : [
       for i in range(1, srv.no_of_instances+1) : {
         instance_name   = "${srv.node_name}-${i}"
@@ -134,8 +134,8 @@ locals {
       }
     ]
   ]
-  instances = flatten(local.serverconfig) # Flattening
-  instance_ids = { # Gets ID from each instance provisioned
+  instances = flatten(local.serverconfig) 
+  instance_ids = { 
     for i in local.instances : i.instance_name => aws_instance.kubeadm[i.instance_name].id
   }
 }

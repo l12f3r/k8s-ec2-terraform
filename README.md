@@ -387,11 +387,11 @@ After setting everything up to this point, just run `terraform apply` to see the
 ```
 aws ec2 describe-instances \
     --filters Name=tag-key,Values=Name \
-    --query 'Reservations[*].Instances[*].{Subnet:SubnetID,VPC:VpcId,Instance:InstanceId,AZ:Placement.AvailabilityZone,Name:Tags[?Key==`Name`]|[0].Value}' \
+    --query 'Reservations[*].Instances[*].{SubnetID:SubnetId,VPC:VpcId,Instance:InstanceId,AZ:Placement.AvailabilityZone,Name:Tags[?Key==`Name`]|[0].Value}' \ 
     --output table
 ```
 
-Those were mine results:
+Results will be displayed like this:
 
 ```
 --------------------------------------------------------------------------------------------------------
@@ -399,8 +399,8 @@ Those were mine results:
 +------------+----------------------+-----------+----------------------------+-------------------------+
 |     AZ     |      Instance        |   Name    |         SubnetID           |           VPC           |
 +------------+----------------------+-----------+----------------------------+-------------------------+
-|  eu-west-1b|  i-030bbae7f7dcf8d81 |  Worker-1 |  subnet-0f67606f309a28c24  |  vpc-044fc25ec58e6af60  |
-|  eu-west-1b|  i-015a6419622ba9b81 |  Worker-2 |  subnet-0f67606f309a28c24  |  vpc-044fc25ec58e6af60  |
-|  eu-west-1a|  i-024a31eeeb7f6a9d3 |  Master-1 |  subnet-0531d901e310d6336  |  vpc-044fc25ec58e6af60  |
+|  eu-west-1a|  i-0ddd44f8e3132d25a |  Master-1 |  subnet-01e721705253880b6  |  vpc-027af063534c396b1  |
+|  eu-west-1b|  i-0f9d5665f8ef8f398 |  Worker-1 |  subnet-096096aec10438580  |  vpc-027af063534c396b1  |
+|  eu-west-1b|  i-0fd51de0a3b30a6bb |  Worker-2 |  subnet-096096aec10438580  |  vpc-027af063534c396b1  |
 +------------+----------------------+-----------+----------------------------+-------------------------+
 ```
