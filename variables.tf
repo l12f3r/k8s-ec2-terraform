@@ -8,6 +8,12 @@ variable "sg_config" {
     default = [{}]
 }
 
+variable "r_cidr_block" {
+  description = "CIDR block for route"
+  default     = "0.0.0.0/0"
+  
+}
+
 variable "vpc_cidr_block" {
   description = "CIDR block for VPC"
   default     = "10.0.0.0/16"
