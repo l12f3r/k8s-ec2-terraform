@@ -47,6 +47,7 @@ root/
 ├── terraform.tfvars # hidden file
 └── instance_provisioning/
     ├── ansible_execution.tf
+    ├── variables.tf
     ├── ansible-kubernetes-setup.yml
 ```
 
