@@ -23,25 +23,25 @@ resource "aws_internet_gateway" "igw" {
 }
 
 resource "aws_route" "r" {
-  route_table_id            = aws_vpc.cluster_vpc.default_route_table_id
-  destination_cidr_block    = var.r_cidr_block
-  gateway_id                = aws_internet_gateway.igw.id
-  depends_on                = [aws_vpc.cluster_vpc]
+  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
+  destination_cidr_block = var.r_cidr_block
+  gateway_id             = aws_internet_gateway.igw.id
+  depends_on             = [aws_vpc.cluster_vpc]
 }
 
 resource "aws_subnet" "master_subnet" {
-  vpc_id                  = aws_vpc.cluster_vpc.id
-  cidr_block              = var.master_subnet_cidr
-  availability_zone       = var.master_subnet_az
+  vpc_id            = aws_vpc.cluster_vpc.id
+  cidr_block        = var.master_subnet_cidr
+  availability_zone = var.master_subnet_az
   tags = {
     Name = "Master"
   }
 }
 
 resource "aws_subnet" "worker_subnet" {
-  vpc_id                  = aws_vpc.cluster_vpc.id
-  cidr_block              = var.worker_subnet_cidr
-  availability_zone       = var.worker_subnet_az
+  vpc_id            = aws_vpc.cluster_vpc.id
+  cidr_block        = var.worker_subnet_cidr
+  availability_zone = var.worker_subnet_az
   tags = {
     Name = "Worker"
   }
@@ -100,7 +100,7 @@ resource "aws_eip" "instance_eips" {
 }
 
 resource "aws_eip_association" "instance_eip_associations" {
-  for_each = local.instance_ids
+  for_each      = local.instance_ids
   instance_id   = local.instance_ids[each.key]
   allocation_id = aws_eip.instance_eips[each.key].id
 }
@@ -110,8 +110,8 @@ resource "aws_instance" "kubeadm" {
   ami                    = each.value.ami
   instance_type          = each.value.instance_type
   key_name               = var.key_name
-  subnet_id              = each.value.instance_type == "t2.medium" ? aws_subnet.master_subnet.id : aws_subnet.worker_subnet.id
-  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master_security_group.id : aws_security_group.worker_security_group.id])
+  subnet_id              = each.value.instance_type == "t2.medium" ? aws_subnet.master_subnet.id : aws_subnet.worker_subnet.id # TODO: find alternative to condition on hardcoded
+  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master_security_group.id : aws_security_group.worker_security_group.id]) # TODO: find alternative to condition on hardcoded
   depends_on = [ 
     aws_internet_gateway.igw,
     aws_security_group.master_security_group,
