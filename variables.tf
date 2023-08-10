@@ -13,9 +13,14 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
-variable "r_cidr" {
-  description = "CIDR block for route"
+variable "r_igw_cidr" {
+  description = "CIDR block for IGW route"
   default     = "0.0.0.0/0"
+}
+
+variable "r_local_cidr" {
+  description = "CIDR block for local route"
+  default     = "10.0.0.0/16"
 }
 
 variable "public_cidr" {

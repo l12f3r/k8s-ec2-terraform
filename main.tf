@@ -22,10 +22,16 @@ resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.cluster_vpc.id
 }
 
-resource "aws_route" "r" {
+resource "aws_route" "igw" {
   route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
-  destination_cidr_block = var.r_cidr
+  destination_cidr_block = var.r_igw_cidr
   gateway_id             = aws_internet_gateway.igw.id
+  depends_on             = [aws_vpc.cluster_vpc]
+}
+
+resource "aws_route" "local" {
+  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
+  destination_cidr_block = var.r_local_cidr
   local_gateway_id       = aws_vpc.cluster_vpc.id
   depends_on             = [aws_vpc.cluster_vpc]
 }
@@ -94,9 +100,10 @@ resource "aws_security_group" "worker_security_group" {
     }
   }
 }
+
 resource "aws_eip" "maintenance" {
   instance   = aws_instance.maintenance.id
-  depends_on = [aws_internet_gateway.igw]
+  depends_on = [aws_instance.kubeadm]
 }
 
 resource "aws_eip_association" "maintenance" {
@@ -145,10 +152,6 @@ resource "aws_instance" "maintenance" {
   instance_type          = local.instances[0].instance_type
   key_name               = var.key_name
   subnet_id              = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.master_security_group.id]
-  depends_on = [ 
-    aws_instance.kubeadm
-  ]
   provisioner "local-exec" {
     command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
     interpreter = ["bash", "-c"]

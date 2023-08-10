@@ -16,7 +16,9 @@ The core provisioning requires:
 - Two security groups, to work as firewalls for inbound traffic on Worker and Master nodes:
 - Two subnets - a public (for the maintenance instance) and a private, for our instances;
 - One Internet Gateway;
-- A route for the default Route Table to the Internet Gateway;
+- Two routes for the default Route Table:
+  - one towards the Internet Gateway; and
+  - other for local connections.
 - A key pair, for AWS authentication;
 - A VPC, where everything above is housed.
 
@@ -35,8 +37,8 @@ The core provisioning requires:
 root/
 ├── main.tf
 ├── variables.tf
-├── terraform.tfvars             # hidden file
-└── ansible-kubernetes-setup.yml # Ansible provisioning
+├── terraform.tfvars              # hidden file
+└── ansible-kubernetes-setup.yml  # Ansible provisioning
 ```
 
 The `main.tf` Terraform code on root will be responsible for creating all instances, each within its matching subnet. Security group rules will be evenly applied to prevent unrequired ingress access.
@@ -123,7 +125,7 @@ sg_config = [
                 from_port = 22, 
                 to_port = 22, 
                 protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+                cidr_blocks = ["10.0.0.0/16"]  #from local instances only
             }
         ],
         egress_ports = [
@@ -158,7 +160,7 @@ sg_config = [
                 from_port = 22, 
                 to_port = 22, 
                 protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+                cidr_blocks = ["10.0.0.0/16"]  #from local instances only
             }
         ],
         egress_ports = [
@@ -207,9 +209,10 @@ The network layout, on a rough overview, should be something like this:
 ```
 aws_vpc.cluster_vpc
 └─aws_subnet.public                 # Public subnet
-  └─aws_route.r                     # Route to the Internet Gateway
+  └─aws_route.igw                   # Route to the Internet Gateway
     └─aws_internet_gateway.igw      # Internet Gateway 🌎
 └─aws.subnet_private                # Private subnet
+  └─aws_route.local                 # Local route
 ```
 
 Code declaration for network features is very straightforward. Make sure everyhing connects to everything.
@@ -221,10 +224,16 @@ resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.cluster_vpc.id
 }
 
-resource "aws_route" "r" {
+resource "aws_route" "igw" {
   route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
-  destination_cidr_block = var.r_cidr
+  destination_cidr_block = var.r_igw_cidr
   gateway_id             = aws_internet_gateway.igw.id
+  depends_on             = [aws_vpc.cluster_vpc]
+}
+
+resource "aws_route" "local" {
+  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
+  destination_cidr_block = var.r_local_cidr
   local_gateway_id       = aws_vpc.cluster_vpc.id
   depends_on             = [aws_vpc.cluster_vpc]
 }
@@ -327,7 +336,7 @@ An Elastic IP is provisioned for providing a public IP to the maintenance instan
 
 resource "aws_eip" "maintenance" {
   instance   = aws_instance.maintenance.id
-  depends_on = [aws_internet_gateway.igw]
+  depends_on = [aws_instance.kubeadm]
 }
 
 resource "aws_eip_association" "maintenance" {
@@ -376,10 +385,6 @@ resource "aws_instance" "maintenance" {
   instance_type          = local.instances[0].instance_type
   key_name               = var.key_name
   subnet_id              = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.master_security_group.id]
-  depends_on = [ 
-    aws_instance.kubeadm
-  ]
   provisioner "local-exec" {
     command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
     interpreter = ["bash", "-c"]
