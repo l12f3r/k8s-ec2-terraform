@@ -2,33 +2,23 @@
 
 Kubernetes cluster deployment on EC2 using Terraform, Ansible and kubeadm based on [Benson Philemon's post on Medium](https://medium.com/@benson.philemon/effortlessly-deploy-a-kubernetes-cluster-on-aws-ec2-with-terraform-and-kubeadm-7bb2aae1d5de).
 
-[KISS principle](https://en.wikipedia.org/wiki/KISS_principle), baby!
+I'm not creating any modules, using outputs or other stuff. [KISS principle](https://en.wikipedia.org/wiki/KISS_principle), baby!
 
 ## Preface and requirements
 
 As commented on [Benson's post](https://medium.com/@benson.philemon/effortlessly-deploy-a-kubernetes-cluster-on-aws-ec2-with-terraform-and-kubeadm-7bb2aae1d5de), this tutorial uses CRI-O as default Container Runtime Interface, but I'm not using Calico as Container Network Interface.
 
 The core provisioning requires:
-- Three EC2 instances: 
-  - one as master node (with 4GB of memory and 2 CPUs); and 
-  - two others as workers (with 1GB of memory and 1 CPU each).
-- Two security groups, to work as firewalls for inbound traffic on both node types:
-  - the master node security group needs to have the following ports opened:
-    - TCP 6443 → For Kubernetes API server
-    - TCP 2379–2380 → For etcd server client API
-    - TCP 10250 → For Kubelet API
-    - TCP 10259 → For kube-scheduler
-    - TCP 10257 → For kube-controller-manager
-    - TCP 22 → For remote access with SSH 
-  - the following ports must be opened for the worker node:
-    - TCP 10250 → For Kubelet API
-    - TCP 30000–32767 → NodePort Services
-    - TCP 22 → For remote access with SSH
-- Two subnets, in different availability zones, for each node type to be properly placed;
-- One Internet Gateway, for accessing the instances;
+- Four EC2 instances: 
+  - one as Master node (with 4GB of memory and 2 CPUs);
+  - two others as Workers (with 1GB of memory and 1 CPU each); and
+  - one as Maintenance instance.
+- Two security groups, to work as firewalls for inbound traffic on Worker and Master nodes:
+- Two subnets - a public (for the maintenance instance) and a private, for our instances;
+- One Internet Gateway;
 - A route for the default Route Table to the Internet Gateway;
-- A key pair, to properly SSH into instances;
-- A VPC, where all of the above is housed.
+- A key pair, for AWS authentication;
+- A VPC, where everything above is housed.
 
 ### Terminal requirements
 
@@ -39,25 +29,21 @@ The core provisioning requires:
 
 ## Infrastructure as Code declaration
 
+### Overview
+
 ```
 root/
 ├── main.tf
 ├── variables.tf
-├── outputs.tf
-├── terraform.tfvars # hidden file
-└── instance_provisioning/
-    ├── ansible_execution.tf
-    ├── variables.tf
-    ├── ansible-kubernetes-setup.yml
+├── terraform.tfvars             # hidden file
+└── ansible-kubernetes-setup.yml # Ansible provisioning
 ```
 
-The `main.tf` Terraform code on root will be responsible for creating the three instances, each within its matching subnet. Security groups rules will be evenly applied to prevent unrequired ingress access.
+The `main.tf` Terraform code on root will be responsible for creating all instances, each within its matching subnet. Security group rules will be evenly applied to prevent unrequired ingress access.
 
-Under the `instance_provisioning` directory, the `ansible_execution.tf` child module gets values from `main.tf`'s output and runs the `ansible-kubernetes-setup.yml` Ansible playbook using `local_exec`. This is where Kubernetes and CRI-O are installed.
+It also uses the maintenance instance to run the `ansible-kubernetes-setup.yml` Ansible playbook using `local_exec`. This is where Kubernetes and CRI-O are installed.
 
-### variables.tf
-
-Notably, the `vm_config` and `sg_config` environment variables are represented as an arrays; one has all instance requirements, while the latter has all security group rules.
+Notably, the `vm_config` and `sg_config` environment variables are represented as arrays; one has all instance requirements, while the latter has all security group rules.
 
 ```
 #variables.tf
@@ -73,9 +59,8 @@ variable "sg_config" {
 }
 ```
 
-
 > [!WARNING]
-> All `.tfvars` information here declared are for learning purposes only. Disclosing its content is not a safe practice. This file is not included for security reasons.
+> All mock `.tfvars` information here declared are for learning purposes only. Disclosing its content is not a safe practice. This file is not included on Git for security reasons, and I highly encourage you to provide your own data sources upon using this code.
 
 ```
 #terraform.tfvars
@@ -189,71 +174,98 @@ sg_config = [
 ]
 ```
 
-### main.tf
+### 1. Key management
 
 After the declaration of providers on first lines, the key pair definitions are set. 
 
-Resource `tls_private_key.access-maintenance-key` generates a ED25519 algorithm key, while `aws_key_pair.access-maintenance-key` creates a SSH key pair using the key previously created and associates it to an AWS EC2 key pair.
+Resource `tls_private_key.access-key` generates a ED25519 algorithm key, while `aws_key_pair.access-key` creates a SSH key pair using the key previously created and associates it to an AWS EC2 key pair.
 - The requested `key_name` is obtained from the `var.key_name` variable. Storing as variable allows to refer to this key using its name, in the future;
-- The `public_key` is obtained from `tls_private_key.access-maintenance-key.public_key_openssh`;
+- The `public_key` is obtained from `tls_private_key.access-key.public_key_openssh`;
 - `provisioner "local-exec"`: After creating the key pair, an additional action will be executed from the terminal:
-  - `command = echo...`: This command creates a file titled as the key name (extracted from `var.key_name`) and injects the generated private file on it from `tls_private_key.access-maintenance-key.private_key_pem`. Then, the key's permissions are adjusted to read-only by the terminal.
+  - `command = echo...`: This command creates a file titled as the key name (extracted from `var.key_name`) and injects the generated private file on it from `tls_private_key.access-key.private_key_pem`. Then, the key's permissions are adjusted to read-only by the terminal.
 
 ```
 #main.tf
 
-resource "tls_private_key" "access-maintenance-key" {
+resource "tls_private_key" "access-key" {
   algorithm = "ED25519"
 }
 
-resource "aws_key_pair" "access-maintenance-key" {
+resource "aws_key_pair" "access-key" {
   key_name   = var.key_name
-  public_key = tls_private_key.access-maintenance-key.public_key_openssh
+  public_key = tls_private_key.access-key.public_key_openssh
   provisioner "local-exec" { 
-    command = "echo '${tls_private_key.access-maintenance-key.private_key_pem}' > ./${var.key_name} | chmod 400 ./${var.key_name}"
+    command = "echo '${tls_private_key.access-key.private_key_pem}' > ./${var.key_name} | chmod 400 ./${var.key_name}"
   }
 }
 ```
-Creation of network features is very straightforward. Make sure everyhing connects to everything.
+
+### 2. Networking
+
+The network layout, on a rough overview, should be something like this:
+
+```
+aws_vpc.cluster_vpc
+└─aws_subnet.public                 # Public subnet
+  └─aws_route.r                     # Route to the Internet Gateway
+    └─aws_internet_gateway.igw      # Internet Gateway 🌎
+└─aws.subnet_private                # Private subnet
+```
+
+Code declaration for network features is very straightforward. Make sure everyhing connects to everything.
 
 ```
 #main.tf
-
-resource "aws_vpc" "cluster_vpc" {
-  cidr_block = var.vpc_cidr_block
-}
 
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.cluster_vpc.id
 }
 
 resource "aws_route" "r" {
-  route_table_id            = aws_vpc.cluster_vpc.default_route_table_id
-  destination_cidr_block    = var.r_cidr_block
-  gateway_id                = aws_internet_gateway.igw.id
-  depends_on                = [aws_vpc.cluster_vpc]
+  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
+  destination_cidr_block = var.r_cidr
+  gateway_id             = aws_internet_gateway.igw.id
+  local_gateway_id       = aws_vpc.cluster_vpc.id
+  depends_on             = [aws_vpc.cluster_vpc]
 }
 
-resource "aws_subnet" "master_subnet" {
-  vpc_id                  = aws_vpc.cluster_vpc.id
-  cidr_block              = var.master_subnet_cidr
-  availability_zone       = var.master_subnet_az
+resource "aws_subnet" "public" {
+  vpc_id            = aws_vpc.cluster_vpc.id
+  cidr_block        = var.public_cidr
+  availability_zone = var.public_az
   tags = {
-    Name = "Master"
+    Name = "Public"
   }
 }
 
-resource "aws_subnet" "worker_subnet" {
-  vpc_id                  = aws_vpc.cluster_vpc.id
-  cidr_block              = var.worker_subnet_cidr
-  availability_zone       = var.worker_subnet_az
+resource "aws_subnet" "private" {
+  vpc_id            = aws_vpc.cluster_vpc.id
+  cidr_block        = var.private_cidr
+  availability_zone = var.private_az
   tags = {
-    Name = "Worker"
+    Name = "Private"
   }
 }
 ```
 
-Security group provisioning is set dynamically, as it iterates through the `sg_config` environment variable and defines rules based on that list.
+### 3. Instances
+
+#### Security groups
+
+Security group provisioning is set dynamically, as it iterates through the `sg_config` environment variable on the `variables.tf` file and defines rules based on that list.
+
+Required ports for Master node:
+- TCP 6443      → For Kubernetes API server
+- TCP 2379–2380 → For etcd server client API
+- TCP 10250     → For Kubelet API
+- TCP 10259     → For kube-scheduler
+- TCP 10257     → For kube-controller-manager
+- TCP 22        → For SSH access (Ansible provisioning)
+
+And for the Worker node:
+- TCP 10250       → For Kubelet API
+- TCP 30000–32767 → NodePort Services
+- TCP 22          → For SSH access (Ansible provisioning)
 
 ```
 #main.tf
@@ -306,29 +318,30 @@ resource "aws_security_group" "worker_security_group" {
 }
 ```
 
-Elastic IPs are provisioned for providing public IPs to our instances. That will allow SSH to be used, that is, Ansible will depend on this to work. Both creation and association to instances are based on iteration.
+#### Elastic IP
+
+An Elastic IP is provisioned for providing a public IP to the maintenance instance. It requires an `aws_eip_association` resource, that will the link between the instance and the EIP.
 
 ```
 #main.tf
 
-resource "aws_eip" "instance_eips" {
-  for_each = local.instance_ids
-  instance = local.instance_ids[each.key]
+resource "aws_eip" "maintenance" {
+  instance   = aws_instance.maintenance.id
+  depends_on = [aws_internet_gateway.igw]
 }
 
-resource "aws_eip_association" "instance_eip_associations" {
-  for_each = local.instance_ids
-  instance_id   = local.instance_ids[each.key]
-  allocation_id = aws_eip.instance_eips[each.key].id
+resource "aws_eip_association" "maintenance" {
+  instance_id   = aws_instance.maintenance.id
+  allocation_id = aws_eip.maintenance.id
+  depends_on    = [aws_eip.maintenance]
 }
 ```
 
-#### Where the magic happens
+#### Instance declaration
 
-The `aws_instance.kubeadm` is the declaration that provisions our instances. It `depends_on` all other network resources to be provisioned.
+The `aws_instance.kubeadm` resource is the declaration that provisions our Kubernetes instances. It `depends_on` all other network resources to be provisioned.
   - `for_each` iterates over the flattened `locals.instances` list and provisions an amount of instances for each item therein included;
-  - `subnet_id` is a conditional: if the instance type is `t2.medium` (which occurs to all `Master` nodes, as per `vm_config`), it should be associated to `aws_subnet.master_subnet` by its ID. Otherwise, it associates to `aws_subnet.worker_subnet`;
-  - The same conditional is applied to `vpc_security_group_ids`, for associating the right instance to its respective security group, but the `toset()` function was applied to convert values to list, as expected by this property.
+  - `vpc_security_group_ids`, associates the right instance to its respective security group - the `toset()` function was applied to convert values to list, as expected by this property.
 
 ```
 #main.tf
@@ -338,14 +351,14 @@ resource "aws_instance" "kubeadm" {
   ami                    = each.value.ami
   instance_type          = each.value.instance_type
   key_name               = var.key_name
-  subnet_id              = each.value.instance_type == "t2.medium" ? aws_subnet.master_subnet.id : aws_subnet.worker_subnet.id
-  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master_security_group.id : aws_security_group.worker_security_group.id])
+  subnet_id              = aws_subnet.private.id
+  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master_security_group.id : aws_security_group.worker_security_group.id]) # TODO: find alternative to condition on hardcoded
   depends_on = [ 
     aws_internet_gateway.igw,
     aws_security_group.master_security_group,
     aws_security_group.worker_security_group,
-    aws_subnet.master_subnet,
-    aws_subnet.worker_subnet,
+    aws_subnet.public,
+    aws_subnet.private,
   ]
   tags = {
     Name = "${each.value.instance_name}"
@@ -353,19 +366,45 @@ resource "aws_instance" "kubeadm" {
 }
 ```
 
+The `aws_instance.maintenance` resource is the declaration for our Maintenance instance. It is responsible for load balancing, provisioning all others instances by running the Ansible playbook and working as update mirror.
+
+```
+#main.tf
+
+resource "aws_instance" "maintenance" {
+  ami                    = local.instances[0].ami
+  instance_type          = local.instances[0].instance_type
+  key_name               = var.key_name
+  subnet_id              = aws_subnet.public.id
+  vpc_security_group_ids = [aws_security_group.master_security_group.id]
+  depends_on = [ 
+    aws_instance.kubeadm
+  ]
+  provisioner "local-exec" {
+    command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
+    interpreter = ["bash", "-c"]
+  }
+  tags = {
+    Name = "Maintenance"
+  }
+}
+```
+
+#### Local variables
+
 `locals`: as the name says, this block [defines local variables to make coding simpler](https://developer.hashicorp.com/terraform/language/values/locals). The environment variables defined here are applicable everywhere, not only on the block where it was provisioned.
 
 This is actually the logic that fetches information and prepares it for `aws_instance.kubeadm`.
 
   1. `serverconfig` iterates over `vm_config` and, for each item (`srv`) on the array, it creates a new object (that is, an EC2 instance) based on properties therein defined;
   2. `instances` uses [flatten](https://developer.hashicorp.com/terraform/language/functions/flatten) to convert the elements of `serverconfig` to a flattened list.
-  3. `instance_ids` gets the ID from each provisioned instance, for outputting reasons.
+  3. `instance_ips` fetches the private IP from each provisioned instance, so it can be used by the Ansible command on Maintenance.
 
 ```
 #main.tf
 
 locals {
-  serverconfig = [ # Fetches instances from .tfvars file
+  serverconfig = [
     for srv in var.vm_config : [
       for i in range(1, srv.no_of_instances+1) : {
         instance_name   = "${srv.node_name}-${i}"
@@ -374,11 +413,74 @@ locals {
       }
     ]
   ]
-  instances = flatten(local.serverconfig) # Flattening
-  instance_ids = { # Gets ID from each instance provisioned
-    for i in local.instances : i.instance_name => aws_instance.kubeadm[i.instance_name].id
+  instances = flatten(local.serverconfig) 
+  instance_ips = {
+    for i in local.instances : i.instance_name => aws_instance.kubeadm[i.instance_name].private_ip
   }
 }
+```
+
+#### Instance provisioning
+
+As mentioned on the `local-exec` declaration, this file (or playbook, according to Ansible jargon) contains code for configuring each instance properly.
+
+- **Install packages**: all Kubernetes-related packages and CRI-O, apart from other packages to ensure a safe and transparent cryptographic communication on the cluster, are installed in this task.
+
+```
+# ansible-kubernetes-setup.yml
+
+---
+- hosts: all
+  become: true
+  tasks:
+    - name: Install Kubernetes-related packages
+      apt:
+        name: ['apt-transport-https', 'ca-certificates', 'curl', 'software-properties-common', 'cri-o', 'kubeadm', 'kubelet', 'kubectl']
+        update_cache: yes
+
+```
+- All kernel modules and sysctl parameters to use Kubernetes (and CRI-O) are defined and loaded on the following tasks:
+
+```
+# ansible-kubernetes-setup.yml
+
+    - name: Copy kernel modules file (/etc/modules-load.d/k8s.conf)
+      copy:
+        content: |
+          overlay
+          br_netfilter
+        dest: /etc/modules-load.d/k8s.conf
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Load kernel modules
+      command: "{{ item }}"
+      with_items:
+        - modprobe overlay
+        - modprobe br_netfilter
+
+    - name: Copy sysctl parameters (/etc/sysctl.d/k8s.conf)
+      copy:
+        content: |
+          net.bridge.bridge-nf-call-iptables  = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward                 = 1
+        dest: /etc/sysctl.d/k8s.conf
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Load sysctl parameters
+      sysctl:
+        name:
+          - net.bridge.bridge-nf-call-iptables
+          - net.bridge.bridge-nf-call-ip6tables
+          - net.ipv4.ip_forward
+        value: 1
+        sysctl_set: yes
+        state: present
+
 ```
 
 ## Execution

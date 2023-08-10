@@ -1,41 +1,40 @@
 variable "vm_config" {
-  description = "List instance objects"
+  description = "Lists instance objects"
   default = [{}]
 }
 
 variable "sg_config" {
-  description = "List security groups"
+  description = "Lists security groups"
     default = [{}]
 }
 
-variable "r_cidr_block" {
-  description = "CIDR block for route"
-  default     = "0.0.0.0/0"
-  
-}
-
-variable "vpc_cidr_block" {
+variable "vpc_cidr" {
   description = "CIDR block for VPC"
   default     = "10.0.0.0/16"
 }
 
-variable "master_subnet_cidr" {
-  description = "CIDR block for Master subnet"
+variable "r_cidr" {
+  description = "CIDR block for route"
+  default     = "0.0.0.0/0"
+}
+
+variable "public_cidr" {
+  description = "CIDR block for Public subnet"
   default     = "10.0.1.0/24"
 }
 
-variable "master_subnet_az" {
-  description = "Availability zone for Master subnet"
+variable "public_az" {
+  description = "Availability zone for Public subnet"
   default     = "eu-west-1a"
 }
 
-variable "worker_subnet_cidr" {
-  description = "CIDR block for Worker subnet"
+variable "private_cidr" {
+  description = "CIDR block for Private subnet"
   default     = "10.0.2.0/24"
 }
 
-variable "worker_subnet_az" {
-  description = "Availability zone for Worker subnet"
+variable "private_az" {
+  description = "Availability zone for Private subnet"
   default     = "eu-west-1b"
 }
 
