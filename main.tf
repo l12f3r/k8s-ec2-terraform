@@ -2,20 +2,20 @@ provider "aws" {
   region = "eu-west-1"
 }
 
-resource "tls_private_key" "access-maintenance-key" {
+resource "tls_private_key" "access-key" {
   algorithm = "ED25519"
 }
 
-resource "aws_key_pair" "access-maintenance-key" {
+resource "aws_key_pair" "access-key" {
   key_name   = var.key_name
-  public_key = tls_private_key.access-maintenance-key.public_key_openssh
+  public_key = tls_private_key.access-key.public_key_openssh
   provisioner "local-exec" { 
-    command = "echo '${tls_private_key.access-maintenance-key.private_key_pem}' > ./${var.key_name} | chmod 400 ./${var.key_name}"
+    command = "echo '${tls_private_key.access-key.private_key_pem}' > ./${var.key_name} | chmod 400 ./${var.key_name}"
   }
 }
 
 resource "aws_vpc" "cluster_vpc" {
-  cidr_block = var.vpc_cidr_block
+  cidr_block = var.vpc_cidr
 }
 
 resource "aws_internet_gateway" "igw" {
@@ -24,26 +24,27 @@ resource "aws_internet_gateway" "igw" {
 
 resource "aws_route" "r" {
   route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
-  destination_cidr_block = var.r_cidr_block
+  destination_cidr_block = var.r_cidr
   gateway_id             = aws_internet_gateway.igw.id
+  local_gateway_id       = aws_vpc.cluster_vpc.id
   depends_on             = [aws_vpc.cluster_vpc]
 }
 
-resource "aws_subnet" "master_subnet" {
+resource "aws_subnet" "public" {
   vpc_id            = aws_vpc.cluster_vpc.id
-  cidr_block        = var.master_subnet_cidr
-  availability_zone = var.master_subnet_az
+  cidr_block        = var.public_cidr
+  availability_zone = var.public_az
   tags = {
-    Name = "Master"
+    Name = "Public"
   }
 }
 
-resource "aws_subnet" "worker_subnet" {
+resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.cluster_vpc.id
-  cidr_block        = var.worker_subnet_cidr
-  availability_zone = var.worker_subnet_az
+  cidr_block        = var.private_cidr
+  availability_zone = var.private_az
   tags = {
-    Name = "Worker"
+    Name = "Private"
   }
 }
 
@@ -93,20 +94,6 @@ resource "aws_security_group" "worker_security_group" {
     }
   }
 }
-
-resource "aws_eip" "instance_eips" {
-  for_each   = local.instance_ids
-  instance   = local.instance_ids[each.key]
-  depends_on = [aws_internet_gateway.igw]
-}
-
-resource "aws_eip_association" "instance_eip_associations" {
-  for_each      = local.instance_ids
-  instance_id   = local.instance_ids[each.key]
-  allocation_id = aws_eip.instance_eips[each.key].id
-  depends_on = [aws_eip.instance_eips]
-}
-
 resource "aws_eip" "maintenance" {
   instance   = aws_instance.maintenance.id
   depends_on = [aws_internet_gateway.igw]
@@ -123,14 +110,14 @@ resource "aws_instance" "kubeadm" {
   ami                    = each.value.ami
   instance_type          = each.value.instance_type
   key_name               = var.key_name
-  subnet_id              = each.value.instance_type == "t2.medium" ? aws_subnet.master_subnet.id : aws_subnet.worker_subnet.id # TODO: find alternative to condition on hardcoded
+  subnet_id              = aws_subnet.private.id
   vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master_security_group.id : aws_security_group.worker_security_group.id]) # TODO: find alternative to condition on hardcoded
   depends_on = [ 
     aws_internet_gateway.igw,
     aws_security_group.master_security_group,
     aws_security_group.worker_security_group,
-    aws_subnet.master_subnet,
-    aws_subnet.worker_subnet,
+    aws_subnet.public,
+    aws_subnet.private,
   ]
   tags = {
     Name = "${each.value.instance_name}"
@@ -148,62 +135,25 @@ locals {
     ]
   ]
   instances = flatten(local.serverconfig) 
-  instance_ids = { 
-    for i in local.instances : i.instance_name => aws_instance.kubeadm[i.instance_name].id
-  }
   instance_ips = {
     for i in local.instances : i.instance_name => aws_instance.kubeadm[i.instance_name].private_ip
   }
-}
-
-output "output_all_ids" {
-  value = [for i, _ in local.instance_ids : aws_instance.kubeadm[i].id]
-}
-
-output "output_all_ips" {
-  value = [for i, _ in local.instance_ids : aws_instance.kubeadm[i].private_ip]
-}
-
-output "output_key_name" {
-  value = var.key_name
-  sensitive = true
 }
 
 resource "aws_instance" "maintenance" {
   ami                    = local.instances[0].ami
   instance_type          = local.instances[0].instance_type
   key_name               = var.key_name
-  subnet_id              = aws_subnet.master_subnet.id
+  subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.master_security_group.id]
   depends_on = [ 
     aws_instance.kubeadm
   ]
-  # provisioner "remote-exec" {
-  #   inline     = ["ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem | ansible-playbook -i '${local.instance_ids[*].private_ip},' ansible-kubernetes-setup.yml"]
-  # }
-
-  # provisioner "local-exec" {
-  #   command     = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem | ansible-playbook -i '${instance_ips}' ansible-kubernetes-setup.yml"
-  #   interpreter = ["bash", "-c"]
-  # }
   provisioner "local-exec" {
     command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
     interpreter = ["bash", "-c"]
   }
   tags = {
-    Name = "Instance used for maintenance"
+    Name = "Maintenance"
   }
 }
-
-# resource "null_resource" "ansible_provisioning" {
-#   triggers = {
-#   maintenance_ip = aws_instance.maintenance.private_ip
-#   }
-#
-#   provisioner "local-exec" {
-#     command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
-#     interpreter = ["bash", "-c"]
-#   }
-#
-#   depends_on = [aws_instance.maintenance, aws_instance.kubeadm]
-# }
