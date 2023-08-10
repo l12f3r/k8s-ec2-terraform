@@ -95,14 +95,27 @@ resource "aws_security_group" "worker_security_group" {
 }
 
 resource "aws_eip" "instance_eips" {
-  for_each = local.instance_ids
-  instance = local.instance_ids[each.key]
+  for_each   = local.instance_ids
+  instance   = local.instance_ids[each.key]
+  depends_on = [aws_internet_gateway.igw]
 }
 
 resource "aws_eip_association" "instance_eip_associations" {
   for_each      = local.instance_ids
   instance_id   = local.instance_ids[each.key]
   allocation_id = aws_eip.instance_eips[each.key].id
+  depends_on = [aws_eip.instance_eips]
+}
+
+resource "aws_eip" "maintenance" {
+  instance   = aws_instance.maintenance.id
+  depends_on = [aws_internet_gateway.igw]
+}
+
+resource "aws_eip_association" "maintenance" {
+  instance_id   = aws_instance.maintenance.id
+  allocation_id = aws_eip.maintenance.id
+  depends_on    = [aws_eip.maintenance]
 }
 
 resource "aws_instance" "kubeadm" {
@@ -138,4 +151,59 @@ locals {
   instance_ids = { 
     for i in local.instances : i.instance_name => aws_instance.kubeadm[i.instance_name].id
   }
+  instance_ips = {
+    for i in local.instances : i.instance_name => aws_instance.kubeadm[i.instance_name].private_ip
+  }
 }
+
+output "output_all_ids" {
+  value = [for i, _ in local.instance_ids : aws_instance.kubeadm[i].id]
+}
+
+output "output_all_ips" {
+  value = [for i, _ in local.instance_ids : aws_instance.kubeadm[i].private_ip]
+}
+
+output "output_key_name" {
+  value = var.key_name
+  sensitive = true
+}
+
+resource "aws_instance" "maintenance" {
+  ami                    = local.instances[0].ami
+  instance_type          = local.instances[0].instance_type
+  key_name               = var.key_name
+  subnet_id              = aws_subnet.master_subnet.id
+  vpc_security_group_ids = [aws_security_group.master_security_group.id]
+  depends_on = [ 
+    aws_instance.kubeadm
+  ]
+  # provisioner "remote-exec" {
+  #   inline     = ["ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem | ansible-playbook -i '${local.instance_ids[*].private_ip},' ansible-kubernetes-setup.yml"]
+  # }
+
+  # provisioner "local-exec" {
+  #   command     = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem | ansible-playbook -i '${instance_ips}' ansible-kubernetes-setup.yml"
+  #   interpreter = ["bash", "-c"]
+  # }
+  provisioner "local-exec" {
+    command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
+    interpreter = ["bash", "-c"]
+  }
+  tags = {
+    Name = "Instance used for maintenance"
+  }
+}
+
+# resource "null_resource" "ansible_provisioning" {
+#   triggers = {
+#   maintenance_ip = aws_instance.maintenance.private_ip
+#   }
+#
+#   provisioner "local-exec" {
+#     command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
+#     interpreter = ["bash", "-c"]
+#   }
+#
+#   depends_on = [aws_instance.maintenance, aws_instance.kubeadm]
+# }
