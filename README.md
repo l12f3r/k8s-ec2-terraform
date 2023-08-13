@@ -220,6 +220,10 @@ Code declaration for network features is very straightforward. Make sure everyhi
 ```
 #main.tf
 
+resource "aws_vpc" "cluster_vpc" {
+  cidr_block = var.vpc_cidr
+}
+
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.cluster_vpc.id
 }
@@ -233,7 +237,14 @@ resource "aws_route" "igw" {
 
 resource "aws_route" "local" {
   route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
-  destination_cidr_block = var.r_local_cidr
+  destination_cidr_block = var.private_cidr
+  local_gateway_id       = aws_vpc.cluster_vpc.id
+  depends_on             = [aws_vpc.cluster_vpc]
+}
+
+resource "aws_route" "public" {
+  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
+  destination_cidr_block = var.public_cidr
   local_gateway_id       = aws_vpc.cluster_vpc.id
   depends_on             = [aws_vpc.cluster_vpc]
 }
