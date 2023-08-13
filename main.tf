@@ -199,7 +199,7 @@ resource "aws_instance" "maintenance" {
   #   command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
   #  interpreter = ["bash", "-c"]
   # }
-  user_data                   = <<-EOT
+  user_data                = <<-EOT
     #!/bin/bash
     ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml
     EOT
