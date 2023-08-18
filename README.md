@@ -18,7 +18,7 @@ The core provisioning requires:
 - One Internet Gateway;
 - One route for the default Route Table:
   - one towards the Internet Gateway;
-  - (local connections would requer another route, but AWS sets this as default)
+  - (local connections would require another route, but AWS sets this as default)
 - A key pair, for AWS authentication;
 - A VPC, where everything above is housed.
 
@@ -262,6 +262,7 @@ The Maintenance instance has its own security group, with its specifications:
 
 ```
 #main.tf
+
 resource "aws_security_group" "maintenance_security_group" {
   name_prefix = "Maintenance-SG-"
   vpc_id      = aws_vpc.cluster_vpc.id
@@ -540,13 +541,14 @@ aws ec2 describe-instances \
 Results will be displayed like this:
 
 ```
---------------------------------------------------------------------------------------------------------
-|                                           DescribeInstances                                          |
-+------------+----------------------+-----------+----------------------------+-------------------------+
-|     AZ     |      Instance        |   Name    |         SubnetID           |           VPC           |
-+------------+----------------------+-----------+----------------------------+-------------------------+
-|  eu-west-1a|  i-0ddd44f8e3132d25a |  Master-1 |  subnet-01e721705253880b6  |  vpc-027af063534c396b1  |
-|  eu-west-1b|  i-0f9d5665f8ef8f398 |  Worker-1 |  subnet-096096aec10438580  |  vpc-027af063534c396b1  |
-|  eu-west-1b|  i-0fd51de0a3b30a6bb |  Worker-2 |  subnet-096096aec10438580  |  vpc-027af063534c396b1  |
-+------------+----------------------+-----------+----------------------------+-------------------------+
+-----------------------------------------------------------------------------------------------------------
+|                                            DescribeInstances                                            |
++------------+----------------------+--------------+----------------------------+-------------------------+
+|     AZ     |      Instance        |    Name      |         SubnetID           |           VPC           |
++------------+----------------------+--------------+----------------------------+-------------------------+
+|  eu-west-1b|  i-00032b8c606ac7698 |  Master-1    |  subnet-0fd054f9dfdcbc8b4  |  vpc-00b57416dae17c7e2  |
+|  eu-west-1b|  i-0d52399007348ed8f |  Worker-1    |  subnet-0fd054f9dfdcbc8b4  |  vpc-00b57416dae17c7e2  |
+|  eu-west-1b|  i-0d81c918170b609e6 |  Worker-2    |  subnet-0fd054f9dfdcbc8b4  |  vpc-00b57416dae17c7e2  |
+|  eu-west-1a|  i-0a7a9610644274c54 |  Maintenance |  subnet-0c6c44712a38a8f2e  |  vpc-00b57416dae17c7e2  |
++------------+----------------------+--------------+----------------------------+-------------------------+
 ```
