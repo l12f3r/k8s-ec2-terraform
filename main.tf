@@ -18,12 +18,6 @@ resource "aws_vpc" "cluster_vpc" {
   cidr_block = var.vpc_cidr
 }
 
-# resource "aws_vpc_endpoint" "endpoint" {
-# vpc_id          = aws_vpc.cluster_vpc.id
-#  service_name    = "com.amazonaws.eu-west-1.console"
-#  route_table_ids = [aws_vpc.cluster_vpc.default_route_table_id]
-#}
-
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.cluster_vpc.id
 }
@@ -34,20 +28,6 @@ resource "aws_route" "igw" {
   gateway_id             = aws_internet_gateway.igw.id
   depends_on             = [aws_vpc.cluster_vpc]
 }
-
-# resource "aws_route" "maintenance_to_private" {
-#  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
-#  destination_cidr_block = var.private_cidr
-#  vpc_endpoint_id        = aws_vpc_endpoint.endpoint.id
-#  depends_on             = [aws_vpc.cluster_vpc]
-#}
-
-# resource "aws_route" "private_to_maintenance" {
-#   route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
-#   destination_cidr_block = aws_subnet.private.cidr_block
-#  vpc_endpoint_id        = aws_vpc_endpoint.endpoint.id
-#  depends_on             = [aws_vpc.cluster_vpc]
-#}
 
 resource "aws_subnet" "public" {
   vpc_id            = aws_vpc.cluster_vpc.id
@@ -71,28 +51,25 @@ resource "aws_security_group" "maintenance_security_group" {
   name_prefix = "Maintenance-SG-"
   vpc_id      = aws_vpc.cluster_vpc.id
 
-  // Ingress rule for SSH access
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  // Change this to a more restricted IP range
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  // Ingress rule for communication with instances in private subnet
   ingress {
-    from_port   = 0
-    to_port     = 65535  // Allow all ports for communication
-    protocol    = "tcp"
+    from_port       = 0
+    to_port         = 65535
+    protocol        = "tcp"
     security_groups = [aws_security_group.worker_security_group.id, aws_security_group.master_security_group.id]  // Replace with actual SG ID
   }
 
-  // Ingress rule for apt-get mirror requests
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  // Change this to a more restricted IP range
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
@@ -195,15 +172,7 @@ resource "aws_instance" "maintenance" {
   key_name                 = var.key_name
   subnet_id                = aws_subnet.public.id
     vpc_security_group_ids = [aws_security_group.maintenance_security_group.id]
-  # provisioner "local-exec" {
-  #   command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
-  #  interpreter = ["bash", "-c"]
-  # }
-  user_data                = <<-EOT
-    #!/bin/bash
-    ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml
-    EOT
-  user_data_replace_on_change = true
+ 
   tags = {
     Name = "Maintenance"
   }

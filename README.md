@@ -16,9 +16,9 @@ The core provisioning requires:
 - Two security groups, to work as firewalls for inbound traffic on Worker and Master nodes:
 - Two subnets - a public (for the maintenance instance) and a private, for our instances;
 - One Internet Gateway;
-- Two routes for the default Route Table:
-  - one towards the Internet Gateway; and
-  - other for local connections.
+- One route for the default Route Table:
+  - one towards the Internet Gateway;
+  - (local connections would requer another route, but AWS sets this as default)
 - A key pair, for AWS authentication;
 - A VPC, where everything above is housed.
 
@@ -235,20 +235,6 @@ resource "aws_route" "igw" {
   depends_on             = [aws_vpc.cluster_vpc]
 }
 
-resource "aws_route" "local" {
-  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
-  destination_cidr_block = var.private_cidr
-  local_gateway_id       = aws_vpc.cluster_vpc.id
-  depends_on             = [aws_vpc.cluster_vpc]
-}
-
-resource "aws_route" "public" {
-  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
-  destination_cidr_block = var.public_cidr
-  local_gateway_id       = aws_vpc.cluster_vpc.id
-  depends_on             = [aws_vpc.cluster_vpc]
-}
-
 resource "aws_subnet" "public" {
   vpc_id            = aws_vpc.cluster_vpc.id
   cidr_block        = var.public_cidr
@@ -272,7 +258,42 @@ resource "aws_subnet" "private" {
 
 #### Security groups
 
-Security group provisioning is set dynamically, as it iterates through the `sg_config` environment variable on the `variables.tf` file and defines rules based on that list.
+The Maintenance instance has its own security group, with its specifications:
+
+```
+#main.tf
+resource "aws_security_group" "maintenance_security_group" {
+  name_prefix = "Maintenance-SG-"
+  vpc_id      = aws_vpc.cluster_vpc.id
+
+  # Ingress rule for SSH access
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]  # Should be changed to a more restricted IP range
+  }
+
+ # Ingress rule for communication with instances in private subnet
+  ingress {
+    from_port       = 0
+    to_port         = 65535  # Allow all ports for communication
+    protocol        = "tcp"
+    security_groups = [aws_security_group.worker_security_group.id, aws_security_group.master_security_group.id]
+  }
+
+  # Ingress rule for mirror requests
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # Should be changed to a more restricted IP range
+  }
+}
+
+```
+
+For Kubernetes instances, the security group provisioning is set dynamically, as it iterates through the `sg_config` environment variable on the `variables.tf` file and defines rules based on that list.
 
 Required ports for Master node:
 - TCP 6443      → For Kubernetes API server
@@ -386,20 +407,18 @@ resource "aws_instance" "kubeadm" {
 }
 ```
 
-The `aws_instance.maintenance` resource is the declaration for our Maintenance instance. It is responsible for load balancing, provisioning all others instances by running the Ansible playbook and working as update mirror.
+The `aws_instance.maintenance` resource is the declaration for our Maintenance instance. It is responsible for load balancing, provisioning all others instances and working as update mirror.
 
 ```
 #main.tf
 
 resource "aws_instance" "maintenance" {
-  ami                    = local.instances[0].ami
-  instance_type          = local.instances[0].instance_type
-  key_name               = var.key_name
-  subnet_id              = aws_subnet.public.id
-  provisioner "local-exec" {
-    command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
-    interpreter = ["bash", "-c"]
-  }
+  ami                      = local.instances[0].ami
+  instance_type            = local.instances[0].instance_type
+  key_name                 = var.key_name
+  subnet_id                = aws_subnet.public.id
+    vpc_security_group_ids = [aws_security_group.maintenance_security_group.id]
+ 
   tags = {
     Name = "Maintenance"
   }
