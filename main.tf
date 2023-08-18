@@ -22,11 +22,10 @@ resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.cluster_vpc.id
 }
 
-resource "aws_route" "r" {
+resource "aws_route" "igw" {
   route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
-  destination_cidr_block = var.r_cidr
+  destination_cidr_block = var.r_igw_cidr
   gateway_id             = aws_internet_gateway.igw.id
-  local_gateway_id       = aws_vpc.cluster_vpc.id
   depends_on             = [aws_vpc.cluster_vpc]
 }
 
@@ -45,6 +44,39 @@ resource "aws_subnet" "private" {
   availability_zone = var.private_az
   tags = {
     Name = "Private"
+  }
+}
+
+resource "aws_security_group" "maintenance_security_group" {
+  name_prefix = "Maintenance-SG-"
+  vpc_id      = aws_vpc.cluster_vpc.id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port       = 0
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_security_group.worker_security_group.id, aws_security_group.master_security_group.id]  // Replace with actual SG ID
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
@@ -94,9 +126,10 @@ resource "aws_security_group" "worker_security_group" {
     }
   }
 }
+
 resource "aws_eip" "maintenance" {
   instance   = aws_instance.maintenance.id
-  depends_on = [aws_internet_gateway.igw]
+  depends_on = [aws_instance.kubeadm]
 }
 
 resource "aws_eip_association" "maintenance" {
@@ -141,18 +174,12 @@ locals {
 }
 
 resource "aws_instance" "maintenance" {
-  ami                    = local.instances[0].ami
-  instance_type          = local.instances[0].instance_type
-  key_name               = var.key_name
-  subnet_id              = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.master_security_group.id]
-  depends_on = [ 
-    aws_instance.kubeadm
-  ]
-  provisioner "local-exec" {
-    command = "ANSIBLE_PRIVATE_KEY_FILE=${var.key_name}.pem ansible-playbook -i '${join(",", values(local.instance_ips))}' ansible-kubernetes-setup.yml"
-    interpreter = ["bash", "-c"]
-  }
+  ami                      = local.instances[0].ami
+  instance_type            = local.instances[0].instance_type
+  key_name                 = var.key_name
+  subnet_id                = aws_subnet.public.id
+    vpc_security_group_ids = [aws_security_group.maintenance_security_group.id]
+ 
   tags = {
     Name = "Maintenance"
   }
