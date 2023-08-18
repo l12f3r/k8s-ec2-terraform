@@ -289,6 +289,14 @@ resource "aws_security_group" "maintenance_security_group" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"] # Should be changed to a more restricted IP range
   }
+
+  # Egress rule
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 ```
