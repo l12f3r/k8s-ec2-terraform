@@ -16,9 +16,8 @@ The core provisioning requires:
 - Two security groups, to work as firewalls for inbound traffic on Worker and Master nodes:
 - Two subnets - a public (for the maintenance instance) and a private, for our instances;
 - One Internet Gateway;
-- One route for the default Route Table:
-  - one towards the Internet Gateway;
-  - (local connections would require another route, but AWS sets this as default)
+- One public Route Table with a route towards the Internet Gateway;
+- One local route associated to the default Route Table;
 - A key pair, for AWS authentication;
 - A VPC, where everything above is housed.
 
@@ -211,11 +210,14 @@ aws_vpc.cluster_vpc
 └─aws_subnet.public                 # Public subnet
   └─aws_route.igw                   # Route to the Internet Gateway
     └─aws_internet_gateway.igw      # Internet Gateway 🌎
-└─aws.subnet_private                # Private subnet
-  └─aws_route.private_route         # Local route
+└─aws_subnet.private                # Private subnet
 ```
 
-Code declaration for network features is very straightforward. There is one local route, for internal communication, and a public for the maintenance instance, on the public subnet. Make sure everyhing connects to everything.
+Code declaration for network features is very straightforward: 
+- The public subnet is explicitly associated to the public route table, which has a route to the Internet Gateway (apart from default local route);
+- The private subnet is explicitly associated to the default route table, which only has the default local route.
+
+Make sure everyhing connects to everything.
 
 ```
 #main.tf
@@ -228,25 +230,25 @@ resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.cluster_vpc.id
 }
 
-resource "aws_route" "igw" {
-  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id # Uses default route table to associate to IGW
-  destination_cidr_block = var.r_igw_cidr
-  gateway_id             = aws_internet_gateway.igw.id
-  depends_on             = [aws_vpc.cluster_vpc]
-}
-
-resource "aws_route_table" "private_route_table" { # For internal communication
+resource "aws_route_table" "public" {
   vpc_id = aws_vpc.cluster_vpc.id
 }
 
-resource "aws_route" "private_route" { # For internal communication
-  route_table_id         = aws_route_table.private_route_table.id
-  destination_cidr_block = var.private_cidr
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public.id
 }
 
-resource "aws_route_table_association" "private_subnet_association" { # For internal communication
+resource "aws_route_table_association" "private" {
   subnet_id      = aws_subnet.private.id
-  route_table_id = aws_route_table.private_route_table.id
+  route_table_id = aws_vpc.cluster_vpc.default_route_table_id
+}
+
+resource "aws_route" "igw" {
+  route_table_id         = aws_route_table.public.id
+  destination_cidr_block = var.r_igw_cidr
+  gateway_id             = aws_internet_gateway.igw.id
+  depends_on             = [aws_vpc.cluster_vpc]
 }
 
 resource "aws_subnet" "public" {

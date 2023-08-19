@@ -24,15 +24,23 @@ resource "aws_internet_gateway" "igw" {
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.cluster_vpc.id
-  route {
-    gateway_id = aws_internet_gateway.igw.id
-    cidr_block = var.public_cidr
-  }
 }
 
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "private" {
+  subnet_id      = aws_subnet.private.id
+  route_table_id = aws_vpc.cluster_vpc.default_route_table_id
+}
+
+resource "aws_route" "igw" {
+  route_table_id         = aws_route_table.public.id
+  destination_cidr_block = var.r_igw_cidr
+  gateway_id             = aws_internet_gateway.igw.id
+  depends_on             = [aws_vpc.cluster_vpc]
 }
 
 resource "aws_subnet" "public" {
