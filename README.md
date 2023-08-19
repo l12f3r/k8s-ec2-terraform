@@ -16,9 +16,8 @@ The core provisioning requires:
 - Two security groups, to work as firewalls for inbound traffic on Worker and Master nodes:
 - Two subnets - a public (for the maintenance instance) and a private, for our instances;
 - One Internet Gateway;
-- One route for the default Route Table:
-  - one towards the Internet Gateway;
-  - (local connections would require another route, but AWS sets this as default)
+- One public Route Table with a route towards the Internet Gateway;
+- One local route associated to the default Route Table;
 - A key pair, for AWS authentication;
 - A VPC, where everything above is housed.
 
@@ -211,11 +210,14 @@ aws_vpc.cluster_vpc
 └─aws_subnet.public                 # Public subnet
   └─aws_route.igw                   # Route to the Internet Gateway
     └─aws_internet_gateway.igw      # Internet Gateway 🌎
-└─aws.subnet_private                # Private subnet
-  └─aws_route.local                 # Local route
+└─aws_subnet.private                # Private subnet
 ```
 
-Code declaration for network features is very straightforward. Make sure everyhing connects to everything.
+Code declaration for network features is very straightforward: 
+- The public subnet is explicitly associated to the public route table, which has a route to the Internet Gateway (apart from default local route);
+- The private subnet is explicitly associated to the default route table, which only has the default local route.
+
+Make sure everyhing connects to everything.
 
 ```
 #main.tf
@@ -228,8 +230,22 @@ resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.cluster_vpc.id
 }
 
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.cluster_vpc.id
+}
+
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "private" {
+  subnet_id      = aws_subnet.private.id
+  route_table_id = aws_vpc.cluster_vpc.default_route_table_id
+}
+
 resource "aws_route" "igw" {
-  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
+  route_table_id         = aws_route_table.public.id
   destination_cidr_block = var.r_igw_cidr
   gateway_id             = aws_internet_gateway.igw.id
   depends_on             = [aws_vpc.cluster_vpc]
@@ -263,7 +279,7 @@ The Maintenance instance has its own security group, with its specifications:
 ```
 #main.tf
 
-resource "aws_security_group" "maintenance_security_group" {
+resource "aws_security_group" "maintenance" {
   name_prefix = "Maintenance-SG-"
   vpc_id      = aws_vpc.cluster_vpc.id
 
@@ -280,7 +296,7 @@ resource "aws_security_group" "maintenance_security_group" {
     from_port       = 0
     to_port         = 65535  # Allow all ports for communication
     protocol        = "tcp"
-    security_groups = [aws_security_group.worker_security_group.id, aws_security_group.master_security_group.id]
+    security_groups = [aws_security_group.worker.id, aws_security_group.master.id]
   }
 
   # Ingress rule for mirror requests
@@ -320,7 +336,7 @@ And for the Worker node:
 ```
 #main.tf
 
-resource "aws_security_group" "master_security_group" {
+resource "aws_security_group" "master" {
   name_prefix = "Master-SG-"
   vpc_id      = aws_vpc.cluster_vpc.id
   dynamic "ingress" {
@@ -343,7 +359,7 @@ resource "aws_security_group" "master_security_group" {
   }
 }  
 
-resource "aws_security_group" "worker_security_group" {
+resource "aws_security_group" "worker" {
   name_prefix = "Worker-SG-"
   vpc_id      = aws_vpc.cluster_vpc.id
   dynamic "ingress" {
@@ -402,11 +418,11 @@ resource "aws_instance" "kubeadm" {
   instance_type          = each.value.instance_type
   key_name               = var.key_name
   subnet_id              = aws_subnet.private.id
-  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master_security_group.id : aws_security_group.worker_security_group.id]) # TODO: find alternative to condition on hardcoded
+  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master.id : aws_security_group.worker.id]) # TODO: find alternative to condition on hardcoded
   depends_on = [ 
     aws_internet_gateway.igw,
-    aws_security_group.master_security_group,
-    aws_security_group.worker_security_group,
+    aws_security_group.master,
+    aws_security_group.worker,
     aws_subnet.public,
     aws_subnet.private,
   ]
@@ -426,7 +442,7 @@ resource "aws_instance" "maintenance" {
   instance_type            = local.instances[0].instance_type
   key_name                 = var.key_name
   subnet_id                = aws_subnet.public.id
-    vpc_security_group_ids = [aws_security_group.maintenance_security_group.id]
+    vpc_security_group_ids = [aws_security_group.maintenance.id]
  
   tags = {
     Name = "Maintenance"
