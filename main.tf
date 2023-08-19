@@ -29,6 +29,20 @@ resource "aws_route" "igw" {
   depends_on             = [aws_vpc.cluster_vpc]
 }
 
+resource "aws_route_table" "private_route_table" {
+  vpc_id = aws_vpc.cluster_vpc.id
+}
+
+resource "aws_route" "private_route" {
+  route_table_id         = aws_route_table.private_route_table.id
+  destination_cidr_block = var.private_cidr
+}
+
+resource "aws_route_table_association" "private_subnet_association" {
+  subnet_id      = aws_subnet.private.id
+  route_table_id = aws_route_table.private_route_table.id
+}
+
 resource "aws_subnet" "public" {
   vpc_id            = aws_vpc.cluster_vpc.id
   cidr_block        = var.public_cidr

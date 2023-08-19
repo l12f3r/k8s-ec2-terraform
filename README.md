@@ -212,10 +212,10 @@ aws_vpc.cluster_vpc
   └─aws_route.igw                   # Route to the Internet Gateway
     └─aws_internet_gateway.igw      # Internet Gateway 🌎
 └─aws.subnet_private                # Private subnet
-  └─aws_route.local                 # Local route
+  └─aws_route.private_route         # Local route
 ```
 
-Code declaration for network features is very straightforward. Make sure everyhing connects to everything.
+Code declaration for network features is very straightforward. There is one local route, for internal communication, and a public for the maintenance instance, on the public subnet. Make sure everyhing connects to everything.
 
 ```
 #main.tf
@@ -229,10 +229,24 @@ resource "aws_internet_gateway" "igw" {
 }
 
 resource "aws_route" "igw" {
-  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id
+  route_table_id         = aws_vpc.cluster_vpc.default_route_table_id # Uses default route table to associate to IGW
   destination_cidr_block = var.r_igw_cidr
   gateway_id             = aws_internet_gateway.igw.id
   depends_on             = [aws_vpc.cluster_vpc]
+}
+
+resource "aws_route_table" "private_route_table" { # For internal communication
+  vpc_id = aws_vpc.cluster_vpc.id
+}
+
+resource "aws_route" "private_route" { # For internal communication
+  route_table_id         = aws_route_table.private_route_table.id
+  destination_cidr_block = var.private_cidr
+}
+
+resource "aws_route_table_association" "private_subnet_association" { # For internal communication
+  subnet_id      = aws_subnet.private.id
+  route_table_id = aws_route_table.private_route_table.id
 }
 
 resource "aws_subnet" "public" {
