@@ -10,7 +10,7 @@ resource "aws_key_pair" "access-key" {
   key_name   = var.key_name
   public_key = tls_private_key.access-key.public_key_openssh
   provisioner "local-exec" { 
-    command = "echo '${tls_private_key.access-key.private_key_pem}' > ./${var.key_name} | chmod 400 ./${var.key_name}"
+    command = "echo '${tls_private_key.access-key.private_key_openssh}' > ./${var.key_name}.pem | chmod 400 ./${var.key_name}.pem"
   }
 }
 
@@ -158,7 +158,18 @@ resource "aws_instance" "kubeadm" {
   instance_type          = each.value.instance_type
   key_name               = var.key_name
   subnet_id              = aws_subnet.private.id
-  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master.id : aws_security_group.worker.id]) # TODO: find alternative to condition on hardcoded
+  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master.id : aws_security_group.worker.id])
+  user_data = <<-EOF
+            #!/bin/bash
+            mkdir -m 700 -p /home/ec2-user/.ssh
+            ssh-keygen -t ed25519 -N "" -f /home/ec2-user/.ssh/id_ed25519
+            echo "${tls_private_key.access-key.private_key_openssh}" > /home/ec2-user/.ssh/id_ed25519
+            chown ec2-user:ec2-user /home/ec2-user/.ssh/id_ed25519
+            chmod 600 /home/ec2-user/.ssh/id_ed25519
+            chown ec2-user:ec2-user /home/ec2-user/.ssh/id_ed25519.pub
+            chmod 600 /home/ec2-user/.ssh/id_ed25519.pub
+            chmod 600 /home/ec2-user/.ssh/authorized_keys
+            EOF
   depends_on = [ 
     aws_internet_gateway.igw,
     aws_security_group.master,
@@ -168,6 +179,33 @@ resource "aws_instance" "kubeadm" {
   ]
   tags = {
     Name = "${each.value.instance_name}"
+  }
+}
+
+resource "aws_instance" "maintenance" {
+  ami                      = local.instances[0].ami
+  instance_type            = local.instances[0].instance_type
+  key_name                 = var.key_name
+  subnet_id                = aws_subnet.public.id
+  vpc_security_group_ids   = [aws_security_group.maintenance.id]
+  #TODO: fix IP declaration on /etc/ansible/hosts (from comma separated to spaces)
+  user_data = <<-EOF
+            #!/bin/bash
+            sudo yum update -y
+            sudo amazon-linux-extras install -y ansible2
+            echo "${join(",", values(local.instance_ips))}" >> /etc/ansible/hosts              
+            mkdir -m 700 -p /home/ec2-user/.ssh
+            ssh-keygen -t ed25519 -N "" -f /home/ec2-user/.ssh/id_ed25519
+            echo "${tls_private_key.access-key.private_key_openssh}" > /home/ec2-user/.ssh/id_ed25519
+            chown ec2-user:ec2-user /home/ec2-user/.ssh/id_ed25519
+            chmod 600 /home/ec2-user/.ssh/id_ed25519
+            chown ec2-user:ec2-user /home/ec2-user/.ssh/id_ed25519.pub
+            chmod 600 /home/ec2-user/.ssh/id_ed25519.pub
+            chmod 600 /home/ec2-user/.ssh/authorized_keys
+            EOF
+ 
+  tags = {
+    Name = "Maintenance"
   }
 }
 
@@ -187,14 +225,3 @@ locals {
   }
 }
 
-resource "aws_instance" "maintenance" {
-  ami                      = local.instances[0].ami
-  instance_type            = local.instances[0].instance_type
-  key_name                 = var.key_name
-  subnet_id                = aws_subnet.public.id
-    vpc_security_group_ids = [aws_security_group.maintenance.id]
- 
-  tags = {
-    Name = "Maintenance"
-  }
-}
