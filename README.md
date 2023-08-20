@@ -183,7 +183,7 @@ Resource `tls_private_key.access-key` generates a ED25519 algorithm key, while `
 - The requested `key_name` is obtained from the `var.key_name` variable. Storing as variable allows to refer to this key using its name, in the future;
 - The `public_key` is obtained from `tls_private_key.access-key.public_key_openssh`;
 - `provisioner "local-exec"`: After creating the key pair, an additional action will be executed from the terminal:
-  - `command = echo...`: This command creates a file titled as the key name (extracted from `var.key_name`) and injects the generated private file on it from `tls_private_key.access-key.private_key_pem`. Then, the key's permissions are adjusted to read-only by the terminal.
+  - `command = echo...`: This command creates a file titled as the key name (extracted from `var.key_name`) and injects the generated private file on it from `tls_private_key.access-key.private_key_openssh`. Then, the key's permissions are adjusted to read-only by the terminal.
 
 ```
 #main.tf
@@ -196,7 +196,7 @@ resource "aws_key_pair" "access-key" {
   key_name   = var.key_name
   public_key = tls_private_key.access-key.public_key_openssh
   provisioner "local-exec" { 
-    command = "echo '${tls_private_key.access-key.private_key_pem}' > ./${var.key_name} | chmod 400 ./${var.key_name}"
+    command = "echo '${tls_private_key.access-key.private_key_openssh}' > ./${var.key_name}.pem | chmod 400 ./${var.key_name}.pem"
   }
 }
 ```
@@ -407,7 +407,9 @@ resource "aws_eip_association" "maintenance" {
 
 The `aws_instance.kubeadm` resource is the declaration that provisions our Kubernetes instances. It `depends_on` all other network resources to be provisioned.
   - `for_each` iterates over the flattened `locals.instances` list and provisions an amount of instances for each item therein included;
-  - `vpc_security_group_ids`, associates the right instance to its respective security group - the `toset()` function was applied to convert values to list, as expected by this property.
+  - `vpc_security_group_ids` - since that the difference between workers and master is the `instance_type`, this code uses a hardcoded reference to associate the right instance to its respective security group. 
+    - The `toset()` function was applied to convert values to list, as expected by this property.
+  - `user_data` is a script executed upon creating the instance. It creates a directory with proper permissions for the key pair, generates the key file without a password and injects the key contents on the file, apart from setting ownership and permissions on related files.
 
 ```
 #main.tf
@@ -418,7 +420,18 @@ resource "aws_instance" "kubeadm" {
   instance_type          = each.value.instance_type
   key_name               = var.key_name
   subnet_id              = aws_subnet.private.id
-  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master.id : aws_security_group.worker.id]) # TODO: find alternative to condition on hardcoded
+  vpc_security_group_ids = toset([each.value.instance_type == "t2.medium" ? aws_security_group.master.id : aws_security_group.worker.id])
+  user_data = <<-EOF
+            #!/bin/bash
+            mkdir -m 700 -p /home/ec2-user/.ssh
+            ssh-keygen -t ed25519 -N "" -f /home/ec2-user/.ssh/id_ed25519
+            echo "${tls_private_key.access-key.private_key_openssh}" > /home/ec2-user/.ssh/id_ed25519
+            chown ec2-user:ec2-user /home/ec2-user/.ssh/id_ed25519
+            chmod 600 /home/ec2-user/.ssh/id_ed25519
+            chown ec2-user:ec2-user /home/ec2-user/.ssh/id_ed25519.pub
+            chmod 600 /home/ec2-user/.ssh/id_ed25519.pub
+            chmod 600 /home/ec2-user/.ssh/authorized_keys
+            EOF
   depends_on = [ 
     aws_internet_gateway.igw,
     aws_security_group.master,
@@ -432,7 +445,7 @@ resource "aws_instance" "kubeadm" {
 }
 ```
 
-The `aws_instance.maintenance` resource is the declaration for our Maintenance instance. It is responsible for load balancing, provisioning all others instances and working as update mirror.
+The `aws_instance.maintenance` resource is the declaration for our Maintenance instance. It is responsible for load balancing, provisioning all others instances and working as update mirror (declared on the `user_data` script).
 
 ```
 #main.tf
@@ -442,7 +455,21 @@ resource "aws_instance" "maintenance" {
   instance_type            = local.instances[0].instance_type
   key_name                 = var.key_name
   subnet_id                = aws_subnet.public.id
-    vpc_security_group_ids = [aws_security_group.maintenance.id]
+  vpc_security_group_ids   = [aws_security_group.maintenance.id]
+  user_data = <<-EOF
+            #!/bin/bash
+            sudo yum update -y
+            sudo amazon-linux-extras install -y ansible2
+            echo "${join(",", values(local.instance_ips))}" >> /etc/ansible/hosts                            
+            mkdir -m 700 -p /home/ec2-user/.ssh
+            ssh-keygen -t ed25519 -N "" -f /home/ec2-user/.ssh/id_ed25519
+            echo "${tls_private_key.access-key.private_key_openssh}" > /home/ec2-user/.ssh/id_ed25519
+            chown ec2-user:ec2-user /home/ec2-user/.ssh/id_ed25519
+            chmod 600 /home/ec2-user/.ssh/id_ed25519
+            chown ec2-user:ec2-user /home/ec2-user/.ssh/id_ed25519.pub
+            chmod 600 /home/ec2-user/.ssh/id_ed25519.pub
+            chmod 600 /home/ec2-user/.ssh/authorized_keys
+            EOF
  
   tags = {
     Name = "Maintenance"
@@ -480,9 +507,41 @@ locals {
 }
 ```
 
-#### Instance provisioning
+### Execution
 
-As mentioned on the `local-exec` declaration, this file (or playbook, according to Ansible jargon) contains code for configuring each instance properly.
+After setting everything up to this point, just run `terraform apply` to see the magic happening. Once completed, run the following code to check the results on the output:
+
+```
+aws ec2 describe-instances \
+    --filters Name=tag-key,Values=Name \
+    --query 'Reservations[*].Instances[*].{SubnetID:SubnetId,VPC:VpcId,Instance:InstanceId,AZ:Placement.AvailabilityZone,Name:Tags[?Key==`Name`]|[0].Value}' \ 
+    --output table
+```
+
+Results will be displayed like this:
+
+```
+-----------------------------------------------------------------------------------------------------------
+|                                            DescribeInstances                                            |
++------------+----------------------+--------------+----------------------------+-------------------------+
+|     AZ     |      Instance        |    Name      |         SubnetID           |           VPC           |
++------------+----------------------+--------------+----------------------------+-------------------------+
+|  eu-west-1b|  i-00032b8c606ac7698 |  Master-1    |  subnet-0fd054f9dfdcbc8b4  |  vpc-00b57416dae17c7e2  |
+|  eu-west-1b|  i-0d52399007348ed8f |  Worker-1    |  subnet-0fd054f9dfdcbc8b4  |  vpc-00b57416dae17c7e2  |
+|  eu-west-1b|  i-0d81c918170b609e6 |  Worker-2    |  subnet-0fd054f9dfdcbc8b4  |  vpc-00b57416dae17c7e2  |
+|  eu-west-1a|  i-0a7a9610644274c54 |  Maintenance |  subnet-0c6c44712a38a8f2e  |  vpc-00b57416dae17c7e2  |
++------------+----------------------+--------------+----------------------------+-------------------------+
+```
+
+### Ansible: Instance provisioning
+
+As mentioned previously, Ansible must be executed from the Maintenance instance to configure each instance properly. From your terminal, on the root directory, locate the `.pem` file and Elastic IP generated by the Terraform code and use them as reference to SSH into the Maintenance instance:
+
+```
+ssh -i "path/to/key.pem" ec2-user@52.30.182.210 # change this IP address for the Elastic IP generated
+```
+
+The `ansible-kubernetes-setup.yml` file (or playbook, according to Ansible jargon) contains code for configuring each instance properly.
 
 - **Install packages**: all Kubernetes-related packages and CRI-O, apart from other packages to ensure a safe and transparent cryptographic communication on the cluster, are installed in this task.
 
@@ -541,30 +600,4 @@ As mentioned on the `local-exec` declaration, this file (or playbook, according 
         sysctl_set: yes
         state: present
 
-```
-
-## Execution
-
-After setting everything up to this point, just run `terraform apply` to see the magic happening. Once completed, run the following code to check the results on the output:
-
-```
-aws ec2 describe-instances \
-    --filters Name=tag-key,Values=Name \
-    --query 'Reservations[*].Instances[*].{SubnetID:SubnetId,VPC:VpcId,Instance:InstanceId,AZ:Placement.AvailabilityZone,Name:Tags[?Key==`Name`]|[0].Value}' \ 
-    --output table
-```
-
-Results will be displayed like this:
-
-```
------------------------------------------------------------------------------------------------------------
-|                                            DescribeInstances                                            |
-+------------+----------------------+--------------+----------------------------+-------------------------+
-|     AZ     |      Instance        |    Name      |         SubnetID           |           VPC           |
-+------------+----------------------+--------------+----------------------------+-------------------------+
-|  eu-west-1b|  i-00032b8c606ac7698 |  Master-1    |  subnet-0fd054f9dfdcbc8b4  |  vpc-00b57416dae17c7e2  |
-|  eu-west-1b|  i-0d52399007348ed8f |  Worker-1    |  subnet-0fd054f9dfdcbc8b4  |  vpc-00b57416dae17c7e2  |
-|  eu-west-1b|  i-0d81c918170b609e6 |  Worker-2    |  subnet-0fd054f9dfdcbc8b4  |  vpc-00b57416dae17c7e2  |
-|  eu-west-1a|  i-0a7a9610644274c54 |  Maintenance |  subnet-0c6c44712a38a8f2e  |  vpc-00b57416dae17c7e2  |
-+------------+----------------------+--------------+----------------------------+-------------------------+
 ```
