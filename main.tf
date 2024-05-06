@@ -1,7 +1,3 @@
-provider "aws" {
-  region = "eu-west-1"
-}
-
 resource "tls_private_key" "access-key" {
   algorithm = "ED25519"
 }
@@ -62,7 +58,7 @@ resource "aws_subnet" "private" {
 }
 
 resource "aws_security_group" "maintenance" {
-  name_prefix = "Maintenance-SG-"
+  name_prefix = "Maintenance-"
   vpc_id      = aws_vpc.cluster_vpc.id
 
   ingress {
@@ -95,7 +91,7 @@ resource "aws_security_group" "maintenance" {
 }
 
 resource "aws_security_group" "master" {
-  name_prefix = "Master-SG-"
+  name_prefix = "Master-"
   vpc_id      = aws_vpc.cluster_vpc.id
   dynamic "ingress" {
     for_each = var.sg_config[0].master.ingress_ports    
@@ -118,7 +114,7 @@ resource "aws_security_group" "master" {
 }  
 
 resource "aws_security_group" "worker" {
-  name_prefix = "Worker-SG-"
+  name_prefix = "Worker-"
   vpc_id      = aws_vpc.cluster_vpc.id
   dynamic "ingress" {
     for_each = var.sg_config[1].worker.ingress_ports

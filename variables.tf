@@ -1,3 +1,8 @@
+variable "aws_primary_region" {
+  description = "Primary region for the AWS resources"
+  default     = "eu-west-1" 
+}
+
 variable "vm_config" {
   description = "Lists instance objects"
   default = [{}]
