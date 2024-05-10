@@ -1,8 +1,6 @@
 # k8s-ec2-terraform
 
-Kubernetes cluster deployment on EC2 using Terraform, Ansible and kubeadm based on [Benson Philemon's post on Medium](https://medium.com/@benson.philemon/effortlessly-deploy-a-kubernetes-cluster-on-aws-ec2-with-terraform-and-kubeadm-7bb2aae1d5de).
-
-I'm not creating any modules, using outputs or other stuff. [KISS principle](https://en.wikipedia.org/wiki/KISS_principle), baby!
+Serverful Kubernetes infrastructure on EC2 using Terraform, based on [Benson Philemon's post on Medium](https://medium.com/@benson.philemon/effortlessly-deploy-a-kubernetes-cluster-on-aws-ec2-with-terraform-and-kubeadm-7bb2aae1d5de).
 
 ## Preface and requirements
 
@@ -23,10 +21,8 @@ The core provisioning requires:
 
 ### Terminal requirements
 
-- Ansible;
 - Terraform;
 - AWS CLI (for maintenance on instance level);
-- kubectl (for maintenance on container level)
 
 ## Infrastructure as Code declaration
 
@@ -35,14 +31,12 @@ The core provisioning requires:
 ```
 root/
 ├── main.tf
+├── providers.tf
 ├── variables.tf
-├── terraform.tfvars              # hidden file
-└── ansible-kubernetes-setup.yml  # Ansible provisioning
+└── terraform.tfvars         # hidden file
 ```
 
 The `main.tf` Terraform code on root will be responsible for creating all instances, each within its matching subnet. Security group rules will be evenly applied to prevent unrequired ingress access.
-
-It also uses the maintenance instance to run the `ansible-kubernetes-setup.yml` Ansible playbook using `local_exec`. This is where Kubernetes and CRI-O are installed.
 
 Notably, the `vm_config` and `sg_config` environment variables are represented as arrays; one has all instance requirements, while the latter has all security group rules.
 
@@ -67,64 +61,63 @@ variable "sg_config" {
 #terraform.tfvars
 
 vm_config = [
-  {
+    {
     "node_name" : "Master",
     "ami" : "ami-061da7f56569c2493",
     "instance_type" : "t2.medium",
     "no_of_instances" : "1",
-  },
-  {
+    },
+    {
     "node_name" : "Worker",
     "ami" : "ami-061da7f56569c2493",
     "instance_type" : "t2.micro",
     "no_of_instances" : "2", 
-  }
+    }
 ]
 sg_config = [
-  {
-    master = {
+    { master = {
         ingress_ports = [
             {
-                # Kubernetes API server
-                from_port = 6443, 
-                to_port = 6443, 
-                protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+            description = "Kubernetes API server"
+            from_port = 6443, 
+            to_port = 6443, 
+            protocol = "tcp", 
+            cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # etcd server client API
-                from_port = 2379, 
-                to_port = 2380, 
-                protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+            description = "etcd server client API"
+            from_port = 2379, 
+            to_port = 2380, 
+            protocol = "tcp", 
+            cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # Kubelet API
-                from_port = 10250, 
-                to_port = 10250, 
-                protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+            description = "Kubelet API"
+            from_port = 10250, 
+            to_port = 10250, 
+            protocol = "tcp", 
+            cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # kube-scheduler
-                from_port = 10259, 
-                to_port = 10259, 
-                protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+            description = "kube-scheduler"
+            from_port = 10259, 
+            to_port = 10259, 
+            protocol = "tcp", 
+            cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # kube-controller-manager
-                from_port = 10257, 
-                to_port = 10257, 
-                protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+            description = "kube-controller-manager"
+            from_port = 10257, 
+            to_port = 10257, 
+            protocol = "tcp", 
+            cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # remote access using SSH
-                from_port = 22, 
-                to_port = 22, 
-                protocol = "tcp", 
-                cidr_blocks = ["10.0.0.0/16"]  #from local instances only
+            description = "remote access using SSH"
+            from_port = 22, 
+            to_port = 22, 
+            protocol = "tcp", 
+            cidr_blocks = ["10.0.0.0/16"]
             }
         ],
         egress_ports = [
@@ -135,31 +128,29 @@ sg_config = [
                 cidr_blocks = ["0.0.0.0/0"]
             }
         ]
-    }
-  },
-  {
-    worker = {
+    }},
+    { worker = {
         ingress_ports = [
             {
-                #Kubelet API
+                description = "Kubelet API"
                 from_port = 10250, 
                 to_port = 10250, 
                 protocol = "tcp", 
                 cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # NodePort Services
+                description = "NodePort Services"
                 from_port = 30000, 
                 to_port = 32767, 
                 protocol = "tcp", 
                 cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # remote access using SSH
+                description = "remote access using SSH"
                 from_port = 22, 
                 to_port = 22, 
                 protocol = "tcp", 
-                cidr_blocks = ["10.0.0.0/16"]  #from local instances only
+                cidr_blocks = ["10.0.0.0/16"]
             }
         ],
         egress_ports = [
@@ -170,8 +161,7 @@ sg_config = [
                 cidr_blocks = ["0.0.0.0/0"]
             }
         ]
-    }
-  }  
+    }}
 ]
 ```
 
@@ -386,7 +376,7 @@ resource "aws_security_group" "worker" {
 
 #### Elastic IP
 
-An Elastic IP is provisioned for providing a public IP to the maintenance instance. It requires an `aws_eip_association` resource, that will the link between the instance and the EIP.
+An Elastic IP is provisioned for providing a public IP to the maintenance instance. It requires an `aws_eip_association` resource, that will work as the link between the instance and the EIP.
 
 ```
 #main.tf
@@ -485,7 +475,7 @@ This is actually the logic that fetches information and prepares it for `aws_ins
 
   1. `serverconfig` iterates over `vm_config` and, for each item (`srv`) on the array, it creates a new object (that is, an EC2 instance) based on properties therein defined;
   2. `instances` uses [flatten](https://developer.hashicorp.com/terraform/language/functions/flatten) to convert the elements of `serverconfig` to a flattened list.
-  3. `instance_ips` fetches the private IP from each provisioned instance, so it can be used by the Ansible command on Maintenance.
+  3. `instance_ips` fetches the private IP from each provisioned instance.
 
 ```
 #main.tf
@@ -533,71 +523,4 @@ Results will be displayed like this:
 +------------+----------------------+--------------+----------------------------+-------------------------+
 ```
 
-### Ansible: Instance provisioning
-
-As mentioned previously, Ansible must be executed from the Maintenance instance to configure each instance properly. From your terminal, on the root directory, locate the `.pem` file and Elastic IP generated by the Terraform code and use them as reference to SSH into the Maintenance instance:
-
-```
-ssh -i "path/to/key.pem" ec2-user@52.30.182.210 # change this IP address for the Elastic IP generated
-```
-
-The `ansible-kubernetes-setup.yml` file (or playbook, according to Ansible jargon) contains code for configuring each instance properly.
-
-- **Install packages**: all Kubernetes-related packages and CRI-O, apart from other packages to ensure a safe and transparent cryptographic communication on the cluster, are installed in this task.
-
-```
-# ansible-kubernetes-setup.yml
-
----
-- hosts: all
-  become: true
-  tasks:
-    - name: Install Kubernetes-related packages
-      apt:
-        name: ['apt-transport-https', 'ca-certificates', 'curl', 'software-properties-common', 'cri-o', 'kubeadm', 'kubelet', 'kubectl']
-        update_cache: yes
-
-```
-- All kernel modules and sysctl parameters to use Kubernetes (and CRI-O) are defined and loaded on the following tasks:
-
-```
-# ansible-kubernetes-setup.yml
-
-    - name: Copy kernel modules file (/etc/modules-load.d/k8s.conf)
-      copy:
-        content: |
-          overlay
-          br_netfilter
-        dest: /etc/modules-load.d/k8s.conf
-        owner: root
-        group: root
-        mode: '0644'
-
-    - name: Load kernel modules
-      command: "{{ item }}"
-      with_items:
-        - modprobe overlay
-        - modprobe br_netfilter
-
-    - name: Copy sysctl parameters (/etc/sysctl.d/k8s.conf)
-      copy:
-        content: |
-          net.bridge.bridge-nf-call-iptables  = 1
-          net.bridge.bridge-nf-call-ip6tables = 1
-          net.ipv4.ip_forward                 = 1
-        dest: /etc/sysctl.d/k8s.conf
-        owner: root
-        group: root
-        mode: '0644'
-
-    - name: Load sysctl parameters
-      sysctl:
-        name:
-          - net.bridge.bridge-nf-call-iptables
-          - net.bridge.bridge-nf-call-ip6tables
-          - net.ipv4.ip_forward
-        value: 1
-        sysctl_set: yes
-        state: present
-
-```
+To SSH into the maintenance instance, make sure to use the key created and the right user: `ssh -i $key_name ec2-user@$elastic_ip`

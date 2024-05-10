@@ -1,7 +1,3 @@
-provider "aws" {
-  region = "eu-west-1"
-}
-
 resource "tls_private_key" "access-key" {
   algorithm = "ED25519"
 }
@@ -62,7 +58,7 @@ resource "aws_subnet" "private" {
 }
 
 resource "aws_security_group" "maintenance" {
-  name_prefix = "Maintenance-SG-"
+  name_prefix = "Maintenance-"
   vpc_id      = aws_vpc.cluster_vpc.id
 
   ingress {
@@ -95,7 +91,7 @@ resource "aws_security_group" "maintenance" {
 }
 
 resource "aws_security_group" "master" {
-  name_prefix = "Master-SG-"
+  name_prefix = "Master-"
   vpc_id      = aws_vpc.cluster_vpc.id
   dynamic "ingress" {
     for_each = var.sg_config[0].master.ingress_ports    
@@ -118,7 +114,7 @@ resource "aws_security_group" "master" {
 }  
 
 resource "aws_security_group" "worker" {
-  name_prefix = "Worker-SG-"
+  name_prefix = "Worker-"
   vpc_id      = aws_vpc.cluster_vpc.id
   dynamic "ingress" {
     for_each = var.sg_config[1].worker.ingress_ports
@@ -188,12 +184,9 @@ resource "aws_instance" "maintenance" {
   key_name                 = var.key_name
   subnet_id                = aws_subnet.public.id
   vpc_security_group_ids   = [aws_security_group.maintenance.id]
-  #TODO: fix IP declaration on /etc/ansible/hosts (from comma separated to spaces)
   user_data = <<-EOF
             #!/bin/bash
             sudo yum update -y
-            sudo amazon-linux-extras install -y ansible2
-            echo "${join(",", values(local.instance_ips))}" >> /etc/ansible/hosts              
             mkdir -m 700 -p /home/ec2-user/.ssh
             ssh-keygen -t ed25519 -N "" -f /home/ec2-user/.ssh/id_ed25519
             echo "${tls_private_key.access-key.private_key_openssh}" > /home/ec2-user/.ssh/id_ed25519
@@ -224,4 +217,3 @@ locals {
     for i in local.instances : i.instance_name => aws_instance.kubeadm[i.instance_name].private_ip
   }
 }
-
