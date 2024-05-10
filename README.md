@@ -61,64 +61,63 @@ variable "sg_config" {
 #terraform.tfvars
 
 vm_config = [
-  {
+    {
     "node_name" : "Master",
     "ami" : "ami-061da7f56569c2493",
     "instance_type" : "t2.medium",
     "no_of_instances" : "1",
-  },
-  {
+    },
+    {
     "node_name" : "Worker",
     "ami" : "ami-061da7f56569c2493",
     "instance_type" : "t2.micro",
     "no_of_instances" : "2", 
-  }
+    }
 ]
 sg_config = [
-  {
-    master = {
+    { master = {
         ingress_ports = [
             {
-                # Kubernetes API server
-                from_port = 6443, 
-                to_port = 6443, 
-                protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+            description = "Kubernetes API server"
+            from_port = 6443, 
+            to_port = 6443, 
+            protocol = "tcp", 
+            cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # etcd server client API
-                from_port = 2379, 
-                to_port = 2380, 
-                protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+            description = "etcd server client API"
+            from_port = 2379, 
+            to_port = 2380, 
+            protocol = "tcp", 
+            cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # Kubelet API
-                from_port = 10250, 
-                to_port = 10250, 
-                protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+            description = "Kubelet API"
+            from_port = 10250, 
+            to_port = 10250, 
+            protocol = "tcp", 
+            cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # kube-scheduler
-                from_port = 10259, 
-                to_port = 10259, 
-                protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+            description = "kube-scheduler"
+            from_port = 10259, 
+            to_port = 10259, 
+            protocol = "tcp", 
+            cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # kube-controller-manager
-                from_port = 10257, 
-                to_port = 10257, 
-                protocol = "tcp", 
-                cidr_blocks = ["0.0.0.0/0"]
+            description = "kube-controller-manager"
+            from_port = 10257, 
+            to_port = 10257, 
+            protocol = "tcp", 
+            cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # remote access using SSH
-                from_port = 22, 
-                to_port = 22, 
-                protocol = "tcp", 
-                cidr_blocks = ["10.0.0.0/16"]  #from local instances only
+            description = "remote access using SSH"
+            from_port = 22, 
+            to_port = 22, 
+            protocol = "tcp", 
+            cidr_blocks = ["10.0.0.0/16"]
             }
         ],
         egress_ports = [
@@ -129,31 +128,29 @@ sg_config = [
                 cidr_blocks = ["0.0.0.0/0"]
             }
         ]
-    }
-  },
-  {
-    worker = {
+    }},
+    { worker = {
         ingress_ports = [
             {
-                #Kubelet API
+                description = "Kubelet API"
                 from_port = 10250, 
                 to_port = 10250, 
                 protocol = "tcp", 
                 cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # NodePort Services
+                description = "NodePort Services"
                 from_port = 30000, 
                 to_port = 32767, 
                 protocol = "tcp", 
                 cidr_blocks = ["0.0.0.0/0"]
             },
             {
-                # remote access using SSH
+                description = "remote access using SSH"
                 from_port = 22, 
                 to_port = 22, 
                 protocol = "tcp", 
-                cidr_blocks = ["10.0.0.0/16"]  #from local instances only
+                cidr_blocks = ["10.0.0.0/16"]
             }
         ],
         egress_ports = [
@@ -164,8 +161,7 @@ sg_config = [
                 cidr_blocks = ["0.0.0.0/0"]
             }
         ]
-    }
-  }  
+    }}
 ]
 ```
 
@@ -479,7 +475,7 @@ This is actually the logic that fetches information and prepares it for `aws_ins
 
   1. `serverconfig` iterates over `vm_config` and, for each item (`srv`) on the array, it creates a new object (that is, an EC2 instance) based on properties therein defined;
   2. `instances` uses [flatten](https://developer.hashicorp.com/terraform/language/functions/flatten) to convert the elements of `serverconfig` to a flattened list.
-  3. `instance_ips` fetches the private IP from each provisioned instance, so it can be used by the Ansible command on Maintenance.
+  3. `instance_ips` fetches the private IP from each provisioned instance.
 
 ```
 #main.tf
@@ -526,3 +522,5 @@ Results will be displayed like this:
 |  eu-west-1a|  i-0a7a9610644274c54 |  Maintenance |  subnet-0c6c44712a38a8f2e  |  vpc-00b57416dae17c7e2  |
 +------------+----------------------+--------------+----------------------------+-------------------------+
 ```
+
+To SSH into the maintenance instance, make sure to use the key created and the right user: `ssh -i $key_name ec2-user@$elastic_ip`

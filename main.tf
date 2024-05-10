@@ -184,12 +184,9 @@ resource "aws_instance" "maintenance" {
   key_name                 = var.key_name
   subnet_id                = aws_subnet.public.id
   vpc_security_group_ids   = [aws_security_group.maintenance.id]
-  #TODO: fix IP declaration on /etc/ansible/hosts (from comma separated to spaces)
   user_data = <<-EOF
             #!/bin/bash
             sudo yum update -y
-            sudo amazon-linux-extras install -y ansible2
-            echo "${join(",", values(local.instance_ips))}" >> /etc/ansible/hosts              
             mkdir -m 700 -p /home/ec2-user/.ssh
             ssh-keygen -t ed25519 -N "" -f /home/ec2-user/.ssh/id_ed25519
             echo "${tls_private_key.access-key.private_key_openssh}" > /home/ec2-user/.ssh/id_ed25519
@@ -220,4 +217,3 @@ locals {
     for i in local.instances : i.instance_name => aws_instance.kubeadm[i.instance_name].private_ip
   }
 }
-
