@@ -4,8 +4,6 @@ Serverful Kubernetes infrastructure on EC2 using Terraform, based on [Benson Phi
 
 ## Preface and requirements
 
-As commented on [Benson's post](https://medium.com/@benson.philemon/effortlessly-deploy-a-kubernetes-cluster-on-aws-ec2-with-terraform-and-kubeadm-7bb2aae1d5de), this tutorial uses CRI-O as default Container Runtime Interface, but I'm not using Calico as Container Network Interface.
-
 The core provisioning requires:
 - Four EC2 instances: 
   - one as Master node (with 4GB of memory and 2 CPUs);
@@ -38,10 +36,15 @@ root/
 
 The `main.tf` Terraform code on root will be responsible for creating all instances, each within its matching subnet. Security group rules will be evenly applied to prevent unrequired ingress access.
 
-Notably, the `vm_config` and `sg_config` environment variables are represented as arrays; one has all instance requirements, while the latter has all security group rules.
+Under `variables.tf`, the primary region is defined along with `vm_config` and `sg_config` environment variables, which are represented as arrays; one has all instance requirements, while the latter has all security group rules.
 
 ```
 #variables.tf
+
+variable "aws_primary_region" {
+  description = "Primary region for the AWS resources"
+  default     = "eu-west-1" 
+}
 
 variable "vm_config" {
   description = "List instance objects"
@@ -449,8 +452,6 @@ resource "aws_instance" "maintenance" {
   user_data = <<-EOF
             #!/bin/bash
             sudo yum update -y
-            sudo amazon-linux-extras install -y ansible2
-            echo "${join(",", values(local.instance_ips))}" >> /etc/ansible/hosts                            
             mkdir -m 700 -p /home/ec2-user/.ssh
             ssh-keygen -t ed25519 -N "" -f /home/ec2-user/.ssh/id_ed25519
             echo "${tls_private_key.access-key.private_key_openssh}" > /home/ec2-user/.ssh/id_ed25519
@@ -503,8 +504,8 @@ After setting everything up to this point, just run `terraform apply` to see the
 
 ```
 aws ec2 describe-instances \
-    --filters Name=tag-key,Values=Name \
-    --query 'Reservations[*].Instances[*].{SubnetID:SubnetId,VPC:VpcId,Instance:InstanceId,AZ:Placement.AvailabilityZone,Name:Tags[?Key==`Name`]|[0].Value}' \ 
+    --filters "Name=tag-key,Values=Name" \
+    --query 'Reservations[*].Instances[*].{SubnetID:SubnetId,VPC:VpcId,Instance:InstanceId,AZ:Placement.AvailabilityZone,Name:Tags[?Key==`Name`]|[0].Value}' \
     --output table
 ```
 
